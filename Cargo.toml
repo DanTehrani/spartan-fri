@@ -1,0 +1,5 @@
+[workspace]
+members = [
+    "evm_verifier",
+    "spartan_fri",
+]
