@@ -62,7 +62,7 @@ fn gen_proof<F: FieldExt<Repr = [u8; 32]>>(num_vars: usize) -> SpartanFRIProof<F
     let (r1cs, witness) = R1CS::produce_synthetic_r1cs(num_cons, num_vars, num_input);
 
     let pp = SpartanPP::new(r1cs, b"test_evm_verify");
-    let mut prover: SpartanFRIProver<F> = SpartanFRIProver::<F>::new(pp);
+    let prover: SpartanFRIProver<F> = SpartanFRIProver::<F>::new(pp);
     prover.prove(&witness)
 }
 

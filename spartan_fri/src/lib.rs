@@ -2,6 +2,7 @@
 use fri::FRIMultilinearPCS;
 use pasta_curves::arithmetic::FieldExt;
 use spartan::prover::SpartanProver;
+use spartan::verifier::SpartanVerifier;
 
 mod fri;
 mod r1cs;
@@ -11,11 +12,11 @@ mod transcript;
 use spartan::SpartanProof;
 
 // Commitment scheme for multilinear polynomials
-pub trait PolyCommitment<F: FieldExt> {
+pub trait PolyCommitment<F: FieldExt>: Clone {
     type Commitment;
     type Opening;
     fn new() -> Self;
-    fn commit(&self) -> Self::Commitment;
+    fn commit(&self, evals: &[F]) -> Self::Commitment;
     fn open(&self, point: &[F]) -> Self::Opening;
 }
 

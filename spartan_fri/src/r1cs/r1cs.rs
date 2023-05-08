@@ -120,16 +120,26 @@ mod tests {
     use pasta_curves::Fp;
 
     #[test]
-    fn test_synthetic_r1cs() {
+    fn test_r1cs() {
         let num_cons = 20;
         let num_vars = 10;
         let num_input = 5;
 
-        let (r1cs, witness) = R1CS::<Fp>::produce_synthetic_r1cs(num_cons, num_vars, num_input);
+        let (r1cs, mut witness) = R1CS::<Fp>::produce_synthetic_r1cs(num_cons, num_vars, num_input);
 
         assert_eq!(witness.len(), num_vars);
         assert_eq!(r1cs.public_input.len(), num_input);
 
         assert!(r1cs.is_sat(&witness, &r1cs.public_input));
+
+        // Should assert if the witness is invalid
+        witness[0] = witness[0] + Fp::one();
+        assert!(r1cs.is_sat(&r1cs.public_input, &witness) == false);
+        witness[0] = witness[0] - Fp::one();
+
+        // Should assert if the public input is invalid
+        let mut public_input = r1cs.public_input.clone();
+        public_input[0] = public_input[0] + Fp::one();
+        assert!(r1cs.is_sat(&witness, &public_input) == false);
     }
 }

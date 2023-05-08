@@ -20,7 +20,8 @@ impl<F: FieldExt<Repr = [u8; 32]>, PCS: PolyCommitment<F>> SpartanProver<F, PCS>
         }
     }
 
-    pub fn prove(&mut self, witness: &[F]) -> SpartanProof<F, PCS> {
+    pub fn prove(&self, witness: &[F]) -> SpartanProof<F, PCS> {
+        let mut transcript = self.pp.transcript.clone();
         // Commit the witness polynomial
 
         // Derive the commitment to the quotient polynomial
@@ -55,17 +56,17 @@ impl<F: FieldExt<Repr = [u8; 32]>, PCS: PolyCommitment<F>> SpartanProver<F, PCS>
         // \sum_{x \in {0, 1}^m} (Az_poly(x) * Bz_poly(x) - Cz_poly(x)) eq(tau, x)
         // is a zero-polynomial using the sum-check protocol.
 
-        let rx = self.pp.transcript.challenge_vec(m);
+        let rx = transcript.challenge_vec(m);
 
         let sc_phase_1 = SumCheckPhase1::new(Az_poly.clone(), Bz_poly.clone(), Cz_poly.clone(), rx);
         let sc_proof_1 = sc_phase_1.prove();
 
-        let r = self.pp.transcript.challenge_vec(3);
+        let r = transcript.challenge_vec(3);
         let r_A = r[0];
         let r_B = r[1];
         let r_C = r[2];
 
-        let ry = self.pp.transcript.challenge_vec(m);
+        let ry = transcript.challenge_vec(m);
 
         let v_A = Az_poly.eval(&ry);
         let v_B = Bz_poly.eval(&ry);

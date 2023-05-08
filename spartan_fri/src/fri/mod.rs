@@ -45,6 +45,7 @@ where
 
 use std::marker::PhantomData;
 
+#[derive(Clone)]
 pub struct FRIMultilinearPCS<F> {
     _marker: PhantomData<F>,
 }
@@ -56,7 +57,7 @@ impl<F: FieldExt> PolyCommitment<F> for FRIMultilinearPCS<F> {
         todo!()
     }
 
-    fn commit(&self) -> Self::Commitment {
+    fn commit(&self, evals: &[F]) -> Self::Commitment {
         todo!()
     }
 

@@ -2,6 +2,7 @@ use merlin::Transcript as MerlinTranscript;
 use pasta_curves::arithmetic::FieldExt;
 use std::marker::PhantomData;
 
+#[derive(Clone)]
 pub struct Transcript<F: FieldExt> {
     transcript_inner: MerlinTranscript,
     _marker: PhantomData<F>,
