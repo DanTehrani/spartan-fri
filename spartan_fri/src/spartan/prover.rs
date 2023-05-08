@@ -1,31 +1,26 @@
 #![allow(non_snake_case)]
 use std::marker::PhantomData;
 
-use crate::fri::FriProver;
-use crate::ml_poly::MlPoly;
-use crate::r1cs::R1CS;
-use crate::sc_phase_1::SumCheckPhase1;
-use crate::sc_phase_2::SumCheckPhase2;
-use crate::transcript::Transcript;
-use crate::SpartanFRIProof;
+use crate::spartan::polynomial::ml_poly::MlPoly;
+use crate::spartan::sumcheck::{SumCheckPhase1, SumCheckPhase2};
+use crate::spartan::{SpartanPP, SpartanProof};
+use crate::PolyCommitment;
 use pasta_curves::arithmetic::FieldExt;
 
-pub struct SpartanFRIProver<F: FieldExt> {
-    pub transcript: Transcript<F>,
-    r1cs: R1CS<F>,
+pub struct SpartanProver<F: FieldExt, PCS: PolyCommitment<F>> {
+    pp: SpartanPP<F, PCS>,
     _marker: PhantomData<F>,
 }
 
-impl<F: FieldExt<Repr = [u8; 32]>> SpartanFRIProver<F> {
-    pub fn new(r1cs: R1CS<F>, transcript: Transcript<F>) -> Self {
+impl<F: FieldExt<Repr = [u8; 32]>, PCS: PolyCommitment<F>> SpartanProver<F, PCS> {
+    pub fn new(pp: SpartanPP<F, PCS>) -> Self {
         Self {
-            transcript, // fri_prover: fri_config,
-            r1cs,
+            pp,
             _marker: PhantomData,
         }
     }
 
-    pub fn prove(&mut self) -> SpartanFRIProof<F> {
+    pub fn prove(&mut self, witness: &[F]) -> SpartanProof<F, PCS> {
         // Commit the witness polynomial
 
         // Derive the commitment to the quotient polynomial
@@ -35,7 +30,7 @@ impl<F: FieldExt<Repr = [u8; 32]>> SpartanFRIProver<F> {
         // 1. Just query at some point x_i in the domain.
         // 2. Compute (f(x_i) - y) / (x_i - ry)
 
-        let m = (self.r1cs.num_vars as f64).log2() as usize;
+        let m = (self.pp.r1cs.num_vars as f64).log2() as usize;
         // First
         // Compute the multilinear extension of the R1CS matrices.
         // Prove that he Q_poly is a zero-polynomial
@@ -48,18 +43,9 @@ impl<F: FieldExt<Repr = [u8; 32]>> SpartanFRIProver<F> {
         // G_poly = A_poly * B_poly - C_poly
 
         // Represent the terms as polynomiales multiplied
-        let Az = self
-            .r1cs
-            .A
-            .mul_vector(self.r1cs.num_cons, &self.r1cs.witness);
-        let Bz = self
-            .r1cs
-            .B
-            .mul_vector(self.r1cs.num_cons, &self.r1cs.witness);
-        let Cz = self
-            .r1cs
-            .C
-            .mul_vector(self.r1cs.num_cons, &self.r1cs.witness);
+        let Az = self.pp.r1cs.A.mul_vector(self.pp.r1cs.num_cons, witness);
+        let Bz = self.pp.r1cs.B.mul_vector(self.pp.r1cs.num_cons, witness);
+        let Cz = self.pp.r1cs.C.mul_vector(self.pp.r1cs.num_cons, witness);
 
         let Az_poly = MlPoly::new(Az);
         let Bz_poly = MlPoly::new(Bz);
@@ -69,17 +55,17 @@ impl<F: FieldExt<Repr = [u8; 32]>> SpartanFRIProver<F> {
         // \sum_{x \in {0, 1}^m} (Az_poly(x) * Bz_poly(x) - Cz_poly(x)) eq(tau, x)
         // is a zero-polynomial using the sum-check protocol.
 
-        let rx = self.transcript.challenge_vec(m);
+        let rx = self.pp.transcript.challenge_vec(m);
 
         let sc_phase_1 = SumCheckPhase1::new(Az_poly.clone(), Bz_poly.clone(), Cz_poly.clone(), rx);
         let sc_proof_1 = sc_phase_1.prove();
 
-        let r = self.transcript.challenge_vec(3);
+        let r = self.pp.transcript.challenge_vec(3);
         let r_A = r[0];
         let r_B = r[1];
         let r_C = r[2];
 
-        let ry = self.transcript.challenge_vec(m);
+        let ry = self.pp.transcript.challenge_vec(m);
 
         let v_A = Az_poly.eval(&ry);
         let v_B = Bz_poly.eval(&ry);
@@ -97,9 +83,10 @@ impl<F: FieldExt<Repr = [u8; 32]>> SpartanFRIProver<F> {
 
         let sc_proof_2 = sc_phase_2.prove();
 
-        SpartanFRIProof {
+        SpartanProof {
             sc_proof_1,
             sc_proof_2,
+            _marker: PhantomData,
         }
     }
 }

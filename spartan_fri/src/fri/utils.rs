@@ -1,16 +1,29 @@
 use crate::transcript::Transcript;
 use pasta_curves::arithmetic::FieldExt;
+use sha3::Digest;
+use sha3::Keccak256;
 
 pub fn hash_two<F>(values: &[F; 2]) -> F
 where
     F: FieldExt<Repr = [u8; 32]>,
 {
+    /*
     let mut bytes = vec![];
     bytes.extend_from_slice(&values[0].to_repr());
     bytes.resize(32, 0);
     bytes.extend_from_slice(&values[1].to_repr());
     bytes.resize(32, 0);
+     */
 
+    let mut hasher = Keccak256::new();
+    hasher.update(values[0].to_repr());
+    hasher.update(values[1].to_repr());
+    let result = hasher.finalize();
+    let bytes_wide = vec![result.to_vec(), vec![0; 32]].concat();
+
+    let val = F::from_bytes_wide(&bytes_wide.try_into().unwrap());
+
+    /*
     let mut bytes_8 = vec![];
     for i in 0..(bytes.len() / 8) {
         let mut acc: u64 = 0;
@@ -20,7 +33,7 @@ where
         bytes_8.push(acc);
     }
 
-    bytes_8.resize(25, 0);
+    bytes_8.resize(25, 33);
 
     keccak::f1600(&mut bytes_8.as_slice().try_into().unwrap());
 
@@ -29,8 +42,12 @@ where
         .flat_map(|x| x.to_le_bytes().to_vec())
         .collect::<Vec<u8>>();
     bytes.reverse();
+    println!("bytes: {:?}", bytes);
 
-    F::from_bytes_wide(&bytes[0..64].try_into().unwrap())
+    let val = F::from_bytes_wide(&bytes[0..64].try_into().unwrap());
+     */
+
+    val
 }
 
 fn sample_index(random_bytes: [u8; 64], size: usize) -> usize {

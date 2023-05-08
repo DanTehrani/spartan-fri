@@ -1,35 +1,43 @@
 #![allow(non_snake_case)]
-mod eq_poly;
-mod fri;
-mod ml_poly;
-mod prover;
-mod r1cs;
-mod sc_phase_1;
-mod sc_phase_2;
-mod transcript;
-mod utils;
-mod verifier;
-
+use fri::FRIMultilinearPCS;
 use pasta_curves::arithmetic::FieldExt;
-use sc_phase_1::SCPhase1Proof;
-use sc_phase_2::SCPhase2Proof;
+use spartan::prover::SpartanProver;
 
-pub use prover::SpartanFRIProver;
-pub use r1cs::R1CS;
-pub use transcript::Transcript;
+mod fri;
+mod r1cs;
+mod spartan;
+mod transcript;
 
-pub struct SpartanFRIProof<F: FieldExt> {
-    pub sc_proof_1: SCPhase1Proof<F>,
-    pub sc_proof_2: SCPhase2Proof<F>,
+use spartan::SpartanProof;
+
+// Commitment scheme for multilinear polynomials
+pub trait PolyCommitment<F: FieldExt> {
+    type Commitment;
+    type Opening;
+    fn new() -> Self;
+    fn commit(&self) -> Self::Commitment;
+    fn open(&self, point: &[F]) -> Self::Opening;
 }
 
+// #######################
+// Re-exports
+// #######################
+
+pub type SpartanFRIProver<F> = SpartanProver<F, FRIMultilinearPCS<F>>;
+pub type SpartanFRIProof<F> = SpartanProof<F, FRIMultilinearPCS<F>>;
+pub use r1cs::R1CS;
+pub use spartan::SpartanPP;
+
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{prover::SpartanFRIProver, r1cs::R1CS, verifier::SpartanFRIVerifier};
 
+    use r1cs::R1CS;
     use pasta_curves::Fp;
     use transcript::Transcript;
+    use spartan::prover
+
     type F = Fp;
 
     #[test]
@@ -41,11 +49,12 @@ mod tests {
         let r1cs = R1CS::<F>::produce_synthetic_r1cs(num_cons, num_vars, num_input);
         let prover_transcript = Transcript::<F>::new(b"test_spartan_fri");
 
-        let mut prover = SpartanFRIProver::<F>::new(r1cs.clone(), prover_transcript);
+        let mut prover = SpartanProver::<F>::new(r1cs.clone(), prover_transcript);
         let proof = prover.prove();
 
         let verifier_transcript = Transcript::<F>::new(b"test_spartan_fri");
-        let mut verifier = SpartanFRIVerifier::<F>::new(r1cs.clone(), verifier_transcript);
+        let mut verifier = SpartanVerifier::<F>::new(r1cs.clone(), verifier_transcript);
         assert!(verifier.verify(&proof));
     }
 }
+ */

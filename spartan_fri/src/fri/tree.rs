@@ -6,7 +6,7 @@ pub struct MerkleTree<F: FieldExt<Repr = [u8; 32]>> {
     pub layers: Vec<Vec<F>>, // to root
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct MerkleProof<F: FieldExt<Repr = [u8; 32]>> {
     pub root: F,
     pub leaf: F,

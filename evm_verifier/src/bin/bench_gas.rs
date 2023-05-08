@@ -10,7 +10,7 @@ use ethers::{
 use evm_verifier::{SpartanSumCheckVerifier, ToCallData};
 use eyre::Result;
 use pasta_curves::arithmetic::FieldExt;
-use spartan_fri::{SpartanFRIProof, SpartanFRIProver, Transcript, R1CS};
+use spartan_fri::{SpartanFRIProof, SpartanFRIProver, SpartanPP, R1CS};
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::runtime::Runtime;
 
@@ -59,11 +59,11 @@ fn gen_proof<F: FieldExt<Repr = [u8; 32]>>(num_vars: usize) -> SpartanFRIProof<F
     let num_vars = num_cons;
     let num_input = 5;
 
-    let r1cs = R1CS::produce_synthetic_r1cs(num_cons, num_vars, num_input);
-    let transcript = Transcript::<F>::new(b"test_evm_verify");
+    let (r1cs, witness) = R1CS::produce_synthetic_r1cs(num_cons, num_vars, num_input);
 
-    let mut prover: SpartanFRIProver<F> = SpartanFRIProver::<F>::new(r1cs, transcript);
-    prover.prove()
+    let pp = SpartanPP::new(r1cs, b"test_evm_verify");
+    let mut prover: SpartanFRIProver<F> = SpartanFRIProver::<F>::new(pp);
+    prover.prove(&witness)
 }
 
 async fn bench_gas(client: Arc<SignerMiddleware<Provider<Http>, LocalWallet>>) -> Result<()> {

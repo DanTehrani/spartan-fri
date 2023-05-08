@@ -1,52 +1,14 @@
-use crate::utils::boolean_hypercube;
-use crate::{eq_poly::EqPoly, ml_poly::MlPoly};
+// Phase 2 sum-check of Spartan.
+
+use crate::spartan::polynomial::eq_poly::EqPoly;
+use crate::spartan::polynomial::ml_poly::MlPoly;
+use crate::spartan::sumcheck::unipoly::UniPoly;
+use crate::spartan::utils::boolean_hypercube;
+
 use pasta_curves::arithmetic::FieldExt;
 
-pub struct UniPoly3<F: FieldExt> {
-    pub coeffs: [F; 4],
-}
-
-impl<F: FieldExt> UniPoly3<F> {
-    pub fn eval(&self, x: F) -> F {
-        // ax^3 + bx^2 + cx + d
-        let x_sq = x.square();
-        let x_cub = x_sq * x;
-
-        let a = self.coeffs[0];
-        let b = self.coeffs[1];
-        let c = self.coeffs[2];
-        let d = self.coeffs[3];
-
-        a * x_cub + b * x_sq + c * x + d
-    }
-
-    pub fn interpolate(evals: &[F; 4]) -> Self {
-        // ax^3 + bx^2 + cx + d
-        let two_inv = F::from(2u64).invert().unwrap();
-        let six_inv = F::from(6u64).invert().unwrap();
-
-        let d = evals[0];
-        let a = six_inv
-            * (evals[3] - evals[2] - evals[2] - evals[2] + evals[1] + evals[1] + evals[1]
-                - evals[0]);
-        let b = two_inv
-            * (evals[0] + evals[0] - evals[1] - evals[1] - evals[1] - evals[1] - evals[1]
-                + evals[2]
-                + evals[2]
-                + evals[2]
-                + evals[2]
-                - evals[3]);
-
-        let c = evals[1] - d - a - b;
-
-        Self {
-            coeffs: [a, b, c, d],
-        }
-    }
-}
-
 pub struct SCPhase1Proof<F: FieldExt> {
-    pub round_polys: Vec<UniPoly3<F>>,
+    pub round_polys: Vec<UniPoly<F>>,
 }
 
 pub struct SumCheckPhase1<F: FieldExt> {
@@ -83,7 +45,7 @@ impl<F: FieldExt> SumCheckPhase1<F> {
         eval
     }
 
-    pub fn round(&self, j: usize) -> UniPoly3<F> {
+    pub fn round(&self, j: usize) -> UniPoly<F> {
         // evaluate at points 0, 1, 2, 3
 
         let zero = F::zero();
@@ -115,13 +77,13 @@ impl<F: FieldExt> SumCheckPhase1<F> {
             evals[3] += self.eval_poly(&eval_at);
         }
 
-        let round_poly = UniPoly3::interpolate(&evals);
+        let round_poly = UniPoly::interpolate(&evals);
         round_poly
     }
 
     pub fn prove(&self) -> SCPhase1Proof<F> {
         let num_vars = self.Az_poly.num_vars;
-        let mut round_polys = Vec::<UniPoly3<F>>::with_capacity(num_vars);
+        let mut round_polys = Vec::<UniPoly<F>>::with_capacity(num_vars);
 
         for i in 0..num_vars {
             let round_poly = self.round(i);
@@ -182,7 +144,7 @@ mod tests {
             evals[i] = eval_i;
         }
 
-        let uni_poly = UniPoly3::interpolate(&evals);
+        let uni_poly = UniPoly::interpolate(&evals);
         let eval = uni_poly.eval(eval_at);
         assert_eq!(eval, expected_eval);
     }

@@ -2,7 +2,7 @@ use super::fft::fft;
 use super::tree::MerkleTree;
 use super::unipoly::UniPoly;
 use super::utils::sample_indices;
-use super::{FriProof, LayerProof};
+use super::{FriEvalProof, FriProof, LayerProof};
 use ff::PrimeField;
 use pasta_curves::arithmetic::FieldExt;
 
@@ -80,14 +80,22 @@ where
         folded_codeword
     }
 
+    fn eval_poly_over_domain(&self, poly: &UniPoly<F>) -> Vec<F> {
+        let mut coeffs_expanded: Vec<F> = poly.coeffs.clone();
+        coeffs_expanded.resize(self.domain.len(), F::zero());
+
+        let evals = fft(&coeffs_expanded, &self.domain);
+        evals
+    }
+
     fn commit(
         &self,
-        codeword: &[F],
+        evals_d: Vec<F>,
         transcript: &mut Transcript<F>,
     ) -> (Vec<Vec<F>>, Vec<MerkleTree<F>>) {
-        let mut domain = self.domain.clone();
+        let mut codewords = vec![evals_d];
 
-        let mut codewords = vec![codeword.to_vec()];
+        let mut domain = self.domain.clone();
         let mut trees = vec![];
 
         for i in 0..self.num_rounds() {
@@ -116,11 +124,15 @@ where
         (codewords, trees)
     }
 
-    fn query(
+    fn query_with_f(
         &self,
         codewords: &[Vec<F>],
         trees: &[MerkleTree<F>],
         indices: &[usize],
+        f_codewords: &[F],
+        f_tree: &MerkleTree<F>,
+        z: F,
+        y: F,
     ) -> Vec<LayerProof<F>> {
         // A domain: w^i
         // B domain: w^{n/2 + i}
@@ -156,34 +168,57 @@ where
                 .collect::<Vec<usize>>();
             let c_indices = indices.clone();
 
-            let mut openings = vec![];
+            let mut q_openings = vec![];
+            let mut f_openings = vec![];
             for j in 0..self.num_colinearity_checks {
                 let a_y = codeword[a_indices[j]];
-                let a_y_proof = trees[i].open(a_y);
+                let q_a_y_proof = trees[i].open(a_y);
+                let f_a_y_proof = f_tree.open(f_codewords[a_indices[j]]);
+
+                println!(
+                    "p q(x) ?=  {:?} {:?}",
+                    (f_codewords[a_indices[j]] - y)
+                        * (self.domain[a_indices[j]] - z).invert().unwrap(),
+                    a_y
+                );
+
                 let b_y = codeword[b_indices[j]];
-                let b_y_proof = trees[i].open(b_y);
+                let q_b_y_proof = trees[i].open(b_y);
+                let f_b_y_proof = f_tree.open(f_codewords[b_indices[j]]);
+
+                /*
+                println!(
+                    "p: {:?} {:?}",
+                    //                    (f_b_y_proof.leaf - y) * (self.domain[b_indices[j]] - z).invert().unwrap()
+                    f_b_y_proof.leaf,
+                    self.domain[b_indices[j]]
+                );
+                 */
 
                 let c_y = codeword[c_indices[j]];
-                let c_y_proof = trees[i].open(c_y);
+                let q_c_y_proof = trees[i].open(c_y);
+                let f_c_y_proof = f_tree.open(f_codewords[c_indices[j]]);
 
-                openings.push((a_y_proof, b_y_proof, c_y_proof));
+                q_openings.push((q_a_y_proof, q_b_y_proof, q_c_y_proof));
+                f_openings.push((f_a_y_proof, f_b_y_proof, f_c_y_proof));
             }
 
-            queries.push(LayerProof { openings })
+            queries.push(LayerProof {
+                q_openings,
+                f_openings,
+            })
         }
 
         queries
     }
 
+    /*
     pub fn prove_degree(&self, poly: &UniPoly<F>, transcript: &mut Transcript<F>) -> FriProof<F> {
         assert!(poly.degree().is_power_of_two());
 
-        let mut coeffs_expanded: Vec<F> = poly.coeffs.clone();
-        coeffs_expanded.resize(self.domain.len(), F::zero());
+        let evals_d = self.eval_poly_over_domain(poly);
 
-        let codewords = fft(&coeffs_expanded, &self.domain);
-
-        let (codewords, trees) = self.commit(&codewords, transcript);
+        let (codewords, trees) = self.commit(evals_d, transcript);
 
         let indices = sample_indices(
             self.num_colinearity_checks,
@@ -192,11 +227,63 @@ where
             transcript,
         );
 
-        let queries = self.query(&codewords, &trees, &indices);
+        let queries = self.query_with_f(&codewords, &trees, &indices,);
 
         FriProof {
             reduced_codeword: codewords[codewords.len() - 1].clone(),
             queries,
+        }
+    }
+     */
+
+    pub fn prove_eval(
+        &self,
+        f: &UniPoly<F>,
+        z: F,
+        transcript: &mut Transcript<F>,
+    ) -> FriEvalProof<F> {
+        let y = f.eval(z);
+
+        // Commit to `f`
+        let f_evals_d = self.eval_poly_over_domain(f);
+        let mut f_tree = MerkleTree::new();
+        let f_comm = f_tree.commit(&f_evals_d);
+
+        let q_evals_d = f_evals_d
+            .iter()
+            .zip(&self.domain)
+            .map(|(e, d)| (*e - y) * (*d - z).invert().unwrap())
+            .collect();
+
+        // Prove proximity of q_evals_d to a low-degree polynomial
+
+        let (q_codewords, q_trees) = self.commit(q_evals_d, transcript);
+
+        let indices = sample_indices(
+            self.num_colinearity_checks,
+            q_codewords[0].len(), // Length of the initial codeword
+            q_codewords[q_codewords.len() - 2].len(), // Length of the reduced codeword
+            transcript,
+        );
+
+        let queries =
+            self.query_with_f(&q_codewords, &q_trees, &indices, &f_evals_d, &f_tree, z, y);
+        // Compute q_evals from the f_evals!
+        // q(x) = (f(x) - y) (x  - z)
+        // f(x) = z
+        //        let q_evals =
+        // Compute q(x)
+
+        let q_ld_proof = FriProof {
+            reduced_codeword: q_codewords[q_codewords.len() - 1].clone(),
+            queries,
+        };
+
+        FriEvalProof {
+            z,
+            y,
+            q_ld_proof,
+            f_comm,
         }
     }
 }

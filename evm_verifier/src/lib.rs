@@ -1,24 +1,6 @@
-use ark_std::{end_timer, start_timer};
-use ethers::{
-    contract::{abigen, ContractFactory},
-    core::utils::Anvil,
-    middleware::{contract::ContractError, SignerMiddleware},
-    prelude::{
-        k256::elliptic_curve::{consts::U25, Field},
-        multicall_contract::Call3,
-        ContractInstance,
-    },
-    providers::{Http, JsonRpcError, Provider},
-    signers::{LocalWallet, Signer},
-    solc::{artifacts::deserialize_bytes, Artifact, Project, ProjectPathsConfig},
-    types::{TransactionReceipt, H160, U256},
-};
-use eyre::Result;
+use ethers::{contract::abigen, types::U256};
 use pasta_curves::arithmetic::FieldExt;
-use pasta_curves::group::ff::PrimeField;
-use serde_json::de::Deserializer;
-use spartan_fri::{SpartanFRIProof, SpartanFRIProver, Transcript, R1CS};
-use std::{os::unix::prelude::FileTypeExt, path::PathBuf, sync::Arc, time::Duration};
+use spartan_fri::SpartanFRIProof;
 
 // Generate the type-safe contract bindings by providing the ABI
 // definition in human readable format
@@ -76,29 +58,4 @@ impl<F: FieldExt<Repr = [u8; 32]>> ToCallData<F> for SpartanFRIProof<F> {
             phase2_round_polys,
         }
     }
-}
-
-async fn main() -> Result<()> {
-    type F = pasta_curves::Fp;
-
-    // 2. instantiate our wallet & anvil
-    let anvil = Anvil::new().spawn();
-    let wallet: LocalWallet = anvil.keys()[0].clone().into();
-
-    //    3. connect to the network
-    let provider =
-        Provider::<Http>::try_from(anvil.endpoint())?.interval(Duration::from_millis(10u64));
-
-    // 4. instantiate the client with the wallet
-    let client = SignerMiddleware::new(provider, wallet.with_chain_id(anvil.chain_id()));
-    let client = Arc::new(client);
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_main() {
-    let result = main().await;
-
-    println!("result: {:?}", result);
 }

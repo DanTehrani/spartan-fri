@@ -1,60 +1,12 @@
-use crate::utils::boolean_hypercube;
-use crate::{eq_poly::EqPoly, ml_poly::MlPoly};
-use pasta_curves::{arithmetic::FieldExt, Eq};
+// Phase 2 sum-check of Spartan.
 
-pub struct UniPoly2<F: FieldExt> {
-    pub coeffs: [F; 3],
-}
-
-impl<F: FieldExt> UniPoly2<F> {
-    pub fn eval(&self, x: F) -> F {
-        // ax^3 + bx^2 + cx + d
-        let x_sq = x.square();
-
-        let a = self.coeffs[0];
-        let b = self.coeffs[1];
-        let c = self.coeffs[2];
-
-        a * x_sq + b * x + c
-    }
-
-    pub fn interpolate(evals: &[F; 3]) -> Self {
-        // ax^2 + bx + c
-        let two_inv = F::TWO_INV;
-
-        // y = ax^2 + bx + c
-
-        // eval at 0
-        // y_0 = c
-
-        // eval at 1
-        // y_1 = a + b + c
-        // b = y_1 - a - c
-
-        // eval at 2
-        // y_2 = 4a + 2b + c
-
-        // 4a + 2b + c - (a + b + c) = y_2  - y1
-        // -> 3a + b = y_2  - y1
-
-        // a + b + c - c = y_1 - y_0
-        // -> a + b = y_1 - y_0
-
-        // 3a + b - (y_2  - y1) = a + b - (y_1 - y_0)
-        // 3a - (y_2  - y1) = a - (y_1 - y_0)
-        // 2a = (y_2  - y1) - (y_1 - y_0)
-        // a = (y_2 - 2y1) + y_0 / 2
-
-        let c = evals[0];
-        let a = (evals[2] - evals[1] - evals[1] + evals[0]) * two_inv;
-        let b = evals[1] - a - c;
-
-        Self { coeffs: [a, b, c] }
-    }
-}
+use crate::spartan::polynomial::ml_poly::MlPoly;
+use crate::spartan::sumcheck::unipoly::UniPoly;
+use crate::spartan::utils::boolean_hypercube;
+use pasta_curves::arithmetic::FieldExt;
 
 pub struct SCPhase2Proof<F: FieldExt> {
-    pub round_polys: Vec<UniPoly2<F>>,
+    pub round_polys: Vec<UniPoly<F>>,
 }
 
 pub struct SumCheckPhase2<F: FieldExt> {
@@ -62,7 +14,6 @@ pub struct SumCheckPhase2<F: FieldExt> {
     Bz_poly: MlPoly<F>,
     Cz_poly: MlPoly<F>,
     r: [F; 3],
-    bound_eq_poly: EqPoly<F>,
     challenge: Vec<F>,
 }
 
@@ -74,13 +25,11 @@ impl<F: FieldExt> SumCheckPhase2<F> {
         r: [F; 3],
         challenge: Vec<F>,
     ) -> Self {
-        let bound_eq_poly = EqPoly::new(challenge.clone());
         Self {
             Az_poly,
             Bz_poly,
             Cz_poly,
             r,
-            bound_eq_poly,
             challenge,
         }
     }
@@ -99,7 +48,7 @@ impl<F: FieldExt> SumCheckPhase2<F> {
         eval
     }
 
-    pub fn round(&self, j: usize) -> UniPoly2<F> {
+    pub fn round(&self, j: usize) -> UniPoly<F> {
         // evaluate at points 0, 1, 2, 3
 
         let zero = F::zero();
@@ -127,13 +76,13 @@ impl<F: FieldExt> SumCheckPhase2<F> {
             evals[2] += self.eval_poly(&eval_at);
         }
 
-        let round_poly = UniPoly2::interpolate(&evals);
+        let round_poly = UniPoly::interpolate(&evals);
         round_poly
     }
 
     pub fn prove(&self) -> SCPhase2Proof<F> {
         let num_vars = self.Az_poly.num_vars;
-        let mut round_polys = Vec::<UniPoly2<F>>::with_capacity(num_vars);
+        let mut round_polys = Vec::<UniPoly<F>>::with_capacity(num_vars);
 
         for i in 0..num_vars {
             let round_poly = self.round(i);
@@ -194,7 +143,7 @@ mod tests {
             evals[i] = eval_i;
         }
 
-        let uni_poly = UniPoly2::interpolate(&evals);
+        let uni_poly = UniPoly::interpolate(&evals);
         let eval = uni_poly.eval(eval_at);
         assert_eq!(eval, expected_eval);
     }

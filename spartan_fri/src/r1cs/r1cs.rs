@@ -9,7 +9,7 @@ impl<F> Matrix<F>
 where
     F: FieldExt,
 {
-    pub fn mul_vector(&self, num_rows: usize, vec: &Vec<F>) -> Vec<F> {
+    pub fn mul_vector(&self, num_rows: usize, vec: &[F]) -> Vec<F> {
         let mut result = vec![F::zero(); num_rows];
         for i in 0..self.0.len() {
             let row = self.0[i].0;
@@ -29,7 +29,6 @@ where
     pub A: Matrix<F>,
     pub B: Matrix<F>,
     pub C: Matrix<F>,
-    pub witness: Vec<F>,
     pub public_input: Vec<F>,
     pub num_cons: usize,
     pub num_vars: usize,
@@ -49,7 +48,11 @@ where
         result
     }
 
-    pub fn produce_synthetic_r1cs(num_cons: usize, num_vars: usize, num_input: usize) -> Self {
+    pub fn produce_synthetic_r1cs(
+        num_cons: usize,
+        num_vars: usize,
+        num_input: usize,
+    ) -> (Self, Vec<F>) {
         //        assert_eq!(num_cons, num_vars);
         let mut public_input = Vec::with_capacity(num_input);
         let mut witness = Vec::with_capacity(num_vars);
@@ -84,16 +87,18 @@ where
             C.push((i, C_col, (z[A_col] * z[B_col]) * z[C_col].invert().unwrap()));
         }
 
-        Self {
-            A: Matrix(A),
-            B: Matrix(B),
-            C: Matrix(C),
+        (
+            Self {
+                A: Matrix(A),
+                B: Matrix(B),
+                C: Matrix(C),
+                public_input,
+                num_cons,
+                num_vars,
+                num_input,
+            },
             witness,
-            public_input,
-            num_cons,
-            num_vars,
-            num_input,
-        }
+        )
     }
 
     pub fn is_sat(&self, witness: &Vec<F>, public_input: &Vec<F>) -> bool {
@@ -120,11 +125,11 @@ mod tests {
         let num_vars = 10;
         let num_input = 5;
 
-        let r1cs = R1CS::<Fp>::produce_synthetic_r1cs(num_cons, num_vars, num_input);
+        let (r1cs, witness) = R1CS::<Fp>::produce_synthetic_r1cs(num_cons, num_vars, num_input);
 
-        assert_eq!(r1cs.witness.len(), num_vars);
+        assert_eq!(witness.len(), num_vars);
         assert_eq!(r1cs.public_input.len(), num_input);
 
-        assert!(r1cs.is_sat(&r1cs.witness, &r1cs.public_input));
+        assert!(r1cs.is_sat(&witness, &r1cs.public_input));
     }
 }
