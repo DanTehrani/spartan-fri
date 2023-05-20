@@ -1,58 +1,26 @@
-use super::fft::fft;
-use super::tree::MerkleTree;
+#![allow(non_snake_case)]
+
+use super::tree::{MerkleProof, MerkleTree};
 use super::unipoly::UniPoly;
-use super::utils::sample_indices;
-use super::{FriEvalProof, FriProof, LayerProof};
-use ff::PrimeField;
+use super::utils::{reduce_indices, sample_indices};
+use super::{BatchedPolyEvalProof, FRIConfig};
+use crate::transcript::Transcript;
+use ark_std::{end_timer, start_timer};
 use pasta_curves::arithmetic::FieldExt;
 
-use crate::transcript::Transcript;
-
-pub struct FriProver<F: PrimeField> {
-    domain: Vec<F>,
-    // Number of colinearity checks per round
-    num_colinearity_checks: usize,
-}
-
-impl<F> FriProver<F>
+pub struct FRIPolyCommitProver<F>
 where
     F: FieldExt<Repr = [u8; 32]>,
 {
-    pub fn new(max_degree: usize) -> Self {
-        // TODO: Allow arbitrary degree
-        assert!(max_degree.is_power_of_two());
+    pub config: FRIConfig<F>,
+}
 
-        // Are these params OK?
-        let expansion_factor = 2;
-        let num_colinearity_checks = 2;
-
-        let root_of_unity = F::root_of_unity();
-        let root_of_unity_log_2 = F::S;
-
-        let domain_order = (max_degree * expansion_factor).next_power_of_two();
-
-        // Generator for the subgroup with order _subgroup_order_ in the field
-        let domain_generator = root_of_unity.pow(&[
-            2u32.pow(32 - ((domain_order as f64).log2() as u32)) as u64,
-            0,
-            0,
-            0,
-        ]);
-
-        let domain = (0..domain_order)
-            .map(|i| domain_generator.pow(&[i as u64, 0, 0, 0]))
-            .collect();
-
-        // Compute the domain generator from the root of unity
-        Self {
-            domain,
-            num_colinearity_checks,
-        }
-    }
-
-    fn num_rounds(&self) -> usize {
-        let domain_order = self.domain.len();
-        ((domain_order as f64).log2() as usize) - 3 // this `3` is just random
+impl<F: FieldExt> FRIPolyCommitProver<F>
+where
+    F: FieldExt<Repr = [u8; 32]>,
+{
+    pub fn new(config: FRIConfig<F>) -> Self {
+        Self { config }
     }
 
     fn fold(&self, codeword: &[F], domain: &[F], alpha: F) -> Vec<F> {
@@ -61,15 +29,13 @@ where
         let one = F::from(1);
 
         let n = domain.len();
-
-        let mut folded_codeword = vec![];
+        let mut folded_codeword = Vec::with_capacity(n / 2);
         for i in 0..(n / 2) {
             // f*(w^2i) = 1/2 * ((1 + alpha * w^-i) * f(w^i) + (1 - alpha * w^-i) * f(-w^i))
             // w^(n/2) = -1
             // -w^i = domain[i + n/2]
 
-            //  let omega_pow_minus_i = self.omega.pow(&[i as u64, 0, 0, 0]).invert().unwrap();
-            let omega_pow_minus_i = domain[n - 1 - i];
+            let omega_pow_minus_i = domain[i].invert().unwrap();
 
             let f_star_eval = two_inv
                 * ((one + alpha * omega_pow_minus_i) * codeword[i]
@@ -80,210 +46,192 @@ where
         folded_codeword
     }
 
-    fn eval_poly_over_domain(&self, poly: &UniPoly<F>) -> Vec<F> {
-        let mut coeffs_expanded: Vec<F> = poly.coeffs.clone();
-        coeffs_expanded.resize(self.domain.len(), F::zero());
-
-        let evals = fft(&coeffs_expanded, &self.domain);
-        evals
-    }
-
-    fn commit(
+    pub fn commit(
         &self,
-        evals_d: Vec<F>,
+        codeword: Vec<F>,
         transcript: &mut Transcript<F>,
     ) -> (Vec<Vec<F>>, Vec<MerkleTree<F>>) {
-        let mut codewords = vec![evals_d];
+        let num_rounds = self.config.num_rounds();
+        let mut oracles = Vec::<MerkleTree<F>>::with_capacity(num_rounds);
+        let mut codewords = Vec::<Vec<F>>::with_capacity(num_rounds);
 
-        let mut domain = self.domain.clone();
-        let mut trees = vec![];
+        let mut codeword = codeword;
+        let mut challenges = Vec::with_capacity(num_rounds);
+        for i in 0..self.config.num_rounds() {
+            if i != 0 {
+                // For i = 0, the verifier derives the opening from the oracle
+                // of f(X), so we don't need to commit to it.
+                let mut tree = MerkleTree::new();
+                let comm = tree.commit(&codeword);
+                oracles.push(tree);
 
-        for i in 0..self.num_rounds() {
-            let current_codeword = &codewords[i];
+                transcript.append_fe(&comm);
+            }
 
-            let mut tree = MerkleTree::new();
-            let root = tree.commit(current_codeword);
-
-            transcript.append_fe(&root);
-            trees.push(tree);
-
-            let alpha = transcript.challenge_fe();
-
-            let next_codeword = self.fold(current_codeword, &domain, alpha);
-            let mut domain_unique = vec![];
-            domain.iter().map(|x| x.square()).for_each(|x| {
-                if !domain_unique.contains(&x) {
-                    domain_unique.push(x);
-                }
-            });
-            domain = domain_unique;
-
-            codewords.push(next_codeword.to_vec())
+            // "Fold" the codeword
+            let x = transcript.challenge_fe();
+            challenges.push(x);
+            codeword = self.fold(&codeword, &self.config.L[i], x);
+            codewords.push(codeword.clone());
         }
 
-        (codewords, trees)
+        (codewords, oracles)
     }
 
-    fn query_with_f(
+    pub fn query(
         &self,
         codewords: &[Vec<F>],
         trees: &[MerkleTree<F>],
-        indices: &[usize],
-        f_codewords: &[F],
-        f_tree: &MerkleTree<F>,
-        z: F,
-        y: F,
-    ) -> Vec<LayerProof<F>> {
-        // A domain: w^i
-        // B domain: w^{n/2 + i}
-        // C domain: w^{2i}
-
-        assert!(indices.len() == self.num_colinearity_checks);
-        let mut indices = indices.to_vec();
-
-        let mut queries = vec![];
-
-        for (i, codeword) in codewords.iter().enumerate() {
-            // Skip the last codeword since the verifier's gonna check it directly
-            if i == codewords.len() - 1 {
-                continue;
-            }
-
-            // Halve the range of the indices
-            indices = indices
-                .iter()
-                .map(|index| {
-                    if codeword.len() == 1 {
-                        0
-                    } else {
-                        index % (codeword.len() / 2)
-                    }
-                })
-                .collect::<Vec<usize>>();
-
-            let a_indices = indices.clone();
-            let b_indices = indices
-                .iter()
-                .map(|index| (codeword.len() / 2) + index)
-                .collect::<Vec<usize>>();
-            let c_indices = indices.clone();
-
-            let mut q_openings = vec![];
-            let mut f_openings = vec![];
-            for j in 0..self.num_colinearity_checks {
-                let a_y = codeword[a_indices[j]];
-                let q_a_y_proof = trees[i].open(a_y);
-                let f_a_y_proof = f_tree.open(f_codewords[a_indices[j]]);
-
-                println!(
-                    "p q(x) ?=  {:?} {:?}",
-                    (f_codewords[a_indices[j]] - y)
-                        * (self.domain[a_indices[j]] - z).invert().unwrap(),
-                    a_y
-                );
-
-                let b_y = codeword[b_indices[j]];
-                let q_b_y_proof = trees[i].open(b_y);
-                let f_b_y_proof = f_tree.open(f_codewords[b_indices[j]]);
-
-                /*
-                println!(
-                    "p: {:?} {:?}",
-                    //                    (f_b_y_proof.leaf - y) * (self.domain[b_indices[j]] - z).invert().unwrap()
-                    f_b_y_proof.leaf,
-                    self.domain[b_indices[j]]
-                );
-                 */
-
-                let c_y = codeword[c_indices[j]];
-                let q_c_y_proof = trees[i].open(c_y);
-                let f_c_y_proof = f_tree.open(f_codewords[c_indices[j]]);
-
-                q_openings.push((q_a_y_proof, q_b_y_proof, q_c_y_proof));
-                f_openings.push((f_a_y_proof, f_b_y_proof, f_c_y_proof));
-            }
-
-            queries.push(LayerProof {
-                q_openings,
-                f_openings,
-            })
-        }
-
-        queries
-    }
-
-    /*
-    pub fn prove_degree(&self, poly: &UniPoly<F>, transcript: &mut Transcript<F>) -> FriProof<F> {
-        assert!(poly.degree().is_power_of_two());
-
-        let evals_d = self.eval_poly_over_domain(poly);
-
-        let (codewords, trees) = self.commit(evals_d, transcript);
-
-        let indices = sample_indices(
-            self.num_colinearity_checks,
-            codewords[0].len(),                   // Length of the initial codeword
-            codewords[codewords.len() - 2].len(), // Length of the reduced codeword
-            transcript,
-        );
-
-        let queries = self.query_with_f(&codewords, &trees, &indices,);
-
-        FriProof {
-            reduced_codeword: codewords[codewords.len() - 1].clone(),
-            queries,
-        }
-    }
-     */
-
-    pub fn prove_eval(
-        &self,
-        f: &UniPoly<F>,
-        z: F,
         transcript: &mut Transcript<F>,
-    ) -> FriEvalProof<F> {
-        let y = f.eval(z);
+    ) -> Vec<Vec<(MerkleProof<F>, MerkleProof<F>, MerkleProof<F>)>> {
+        let sample_indices_timer = start_timer!(|| "Sample indices");
+        let mut indices =
+            sample_indices(self.config.num_queries, self.config.L[0].len(), transcript);
+        end_timer!(sample_indices_timer);
 
-        // Commit to `f`
-        let f_evals_d = self.eval_poly_over_domain(f);
-        let mut f_tree = MerkleTree::new();
-        let f_comm = f_tree.commit(&f_evals_d);
+        let num_rounds = self.config.num_rounds();
+        let mut openings = Vec::with_capacity(num_rounds);
 
-        let q_evals_d = f_evals_d
-            .iter()
-            .zip(&self.domain)
-            .map(|(e, d)| (*e - y) * (*d - z).invert().unwrap())
-            .collect();
+        for i in 0..(num_rounds - 1) {
+            let codeword = codewords[i].clone();
+            let codeword_next = codewords[i + 1].clone();
+            let tree = &trees[i];
+            let tree_next = &trees[i + 1];
 
-        // Prove proximity of q_evals_d to a low-degree polynomial
+            reduce_indices(&mut indices, codeword_next.len());
+            // Compute the degree-1 polynomial from the indices
 
-        let (q_codewords, q_trees) = self.commit(q_evals_d, transcript);
+            let mut openings_i = Vec::with_capacity(indices.len());
+            for index in &indices {
+                let alpha_0 = codeword[*index];
+                let alpha_1 = codeword[index + (codeword.len() / 2)];
+                let beta = codeword_next[*index];
 
-        let indices = sample_indices(
-            self.num_colinearity_checks,
-            q_codewords[0].len(), // Length of the initial codeword
-            q_codewords[q_codewords.len() - 2].len(), // Length of the reduced codeword
-            transcript,
-        );
+                // Check that the folded polynomial equals the
+                // random linear combination of the og polynomial.
 
-        let queries =
-            self.query_with_f(&q_codewords, &q_trees, &indices, &f_evals_d, &f_tree, z, y);
-        // Compute q_evals from the f_evals!
-        // q(x) = (f(x) - y) (x  - z)
-        // f(x) = z
-        //        let q_evals =
-        // Compute q(x)
+                // Sanity check
+                let s_0 = self.config.L[i][*index];
+                let s_1 = self.config.L[i][index + (codeword.len() / 2)];
+                let y = self.config.L[i + 1][*index];
+                assert_eq!(y, s_0 * s_0);
+                assert_eq!(y, s_1 * s_1);
 
-        let q_ld_proof = FriProof {
-            reduced_codeword: q_codewords[q_codewords.len() - 1].clone(),
-            queries,
-        };
+                let alpha_0_opening = tree.open(alpha_0);
+                let alpha_1_opening = tree.open(alpha_1);
+                let beta_opening = tree_next.open(beta);
 
-        FriEvalProof {
+                let opening = (alpha_0_opening, alpha_1_opening, beta_opening);
+                openings_i.push(opening);
+            }
+            openings.push(openings_i);
+        }
+
+        openings
+    }
+
+    pub fn batch_prove(
+        &self,
+        polys: &[UniPoly<F>],
+        transcript: &mut Transcript<F>,
+    ) -> BatchedPolyEvalProof<F> {
+        let mut codeword = vec![F::zero(); self.config.L[0].len()];
+
+        // Committed Merkle trees of the polynomials
+        let mut f_trees = Vec::with_capacity(polys.len());
+
+        // Store the codewords to open later
+        let mut f_codewords = Vec::with_capacity(polys.len());
+
+        let mut z = Vec::with_capacity(polys.len());
+        let mut y = Vec::with_capacity(polys.len());
+        // Compute the codeword of g(X)
+        for i in 0..polys.len() {
+            let poly = &polys[i];
+            let k = (poly.degree() + 2).next_power_of_two();
+
+            let evals = poly.eval_fft(&self.config.L[0]);
+            f_codewords.push(evals.clone());
+
+            let mut tree = MerkleTree::new();
+            let comm = tree.commit(&evals);
+            f_trees.push(tree);
+
+            // Commit the codeword
+            transcript.append_fe(&comm);
+
+            // Get the challenge evaluation point
+            let z_i = transcript.challenge_fe();
+            let y_i = poly.eval(z_i);
+
+            z.push(z_i);
+            y.push(y_i);
+
+            // Derive the codeword of the quotient polynomial
+            let q_evals = evals
+                .iter()
+                .zip(self.config.L[0].iter())
+                .map(|(f, x)| (*f - y_i) * (*x - z_i).invert().unwrap())
+                .collect::<Vec<F>>();
+
+            // Compute the challenges (i.e. random weights)
+            let alpha = transcript.challenge_fe();
+            let beta = transcript.challenge_fe();
+
+            let pad_degree = k - poly.degree() - 1;
+
+            let weighed_evals = q_evals
+                .iter()
+                .enumerate()
+                .map(|(j, e)| {
+                    let weighted = alpha * e
+                        + beta * e * self.config.L[0][j].pow(&[pad_degree as u64, 0, 0, 0]);
+
+                    weighted
+                })
+                .collect::<Vec<F>>();
+
+            for (j, weighted_eval) in weighed_evals.iter().enumerate() {
+                codeword[j] += weighted_eval;
+            }
+        }
+
+        let commit_timer = start_timer!(|| "Commit");
+        let (mut codewords, mut oracles) = self.commit(codeword.clone(), transcript);
+        end_timer!(commit_timer);
+
+        // TODO: We can do better!
+        let mut unused_tree = MerkleTree::new();
+        unused_tree.commit(&codeword);
+
+        codewords.insert(0, codeword);
+        oracles.insert(0, unused_tree);
+
+        let query_timer = start_timer!(|| "Query");
+        let queries = self.query(&codewords, &oracles, transcript);
+        end_timer!(query_timer);
+
+        let mut poly_openings = Vec::with_capacity(polys.len());
+
+        // Open the polynomials at the indices
+        for query in &queries[0] {
+            let (alpha_0_opening, alpha_1_opening, _) = query;
+            let mut openings = Vec::with_capacity(polys.len());
+            for (i, tree) in f_trees.iter().enumerate() {
+                let opening_alpha_0 = tree.open(f_codewords[i][alpha_0_opening.leaf_index]);
+                let opening_alpha_1 = tree.open(f_codewords[i][alpha_1_opening.leaf_index]);
+                openings.push((opening_alpha_0, opening_alpha_1));
+            }
+            poly_openings.push(openings);
+        }
+
+        BatchedPolyEvalProof {
+            openings: queries,
+            poly_openings,
+            poly_degrees: polys.iter().map(|p| p.degree()).collect(),
             z,
             y,
-            q_ld_proof,
-            f_comm,
+            reduced_codeword: codewords[codewords.len() - 1].clone(),
         }
     }
 }

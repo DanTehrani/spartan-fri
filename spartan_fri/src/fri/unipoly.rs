@@ -23,6 +23,17 @@ where
         self.coeffs.len() - 1
     }
 
+    pub fn eval_fft(&self, domain: &[F]) -> Vec<F> {
+        // Pad the coefficients vector with zeros to match the domain size
+        let mut padded_coeffs = self.coeffs.clone();
+        let mut pad = Vec::with_capacity(domain.len());
+        pad.resize(domain.len() - self.coeffs.len(), F::zero());
+        padded_coeffs.extend_from_slice(&pad);
+
+        // Evaluate with FFT
+        fft(&padded_coeffs, domain)
+    }
+
     pub fn eval(&self, x: F) -> F {
         let mut result = F::zero();
         for (i, coeff) in self.coeffs.iter().enumerate() {

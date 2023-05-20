@@ -19,6 +19,8 @@ where
     hasher.update(values[0].to_repr());
     hasher.update(values[1].to_repr());
     let result = hasher.finalize();
+
+    // Pad to 64 bytes
     let bytes_wide = vec![result.to_vec(), vec![0; 32]].concat();
 
     let val = F::from_bytes_wide(&bytes_wide.try_into().unwrap());
@@ -62,16 +64,9 @@ fn sample_index(random_bytes: [u8; 64], size: usize) -> usize {
 pub fn sample_indices<F: FieldExt<Repr = [u8; 32]>>(
     num_indices: usize,
     max_index: usize,
-    reduced_max_index: usize,
     transcript: &mut Transcript<F>,
 ) -> Vec<usize> {
-    assert!(num_indices <= 2 * reduced_max_index, "not enough entropy!");
-    assert!(num_indices <= reduced_max_index);
-
-    let mut indices = vec![];
-
-    let mut reduced_indices = vec![];
-
+    let mut indices = Vec::with_capacity(num_indices);
     let mut counter: u32 = 0;
 
     while indices.len() < num_indices {
@@ -81,14 +76,33 @@ pub fn sample_indices<F: FieldExt<Repr = [u8; 32]>>(
         transcript.challenge_bytes(&mut random_bytes);
 
         let index = sample_index(random_bytes, max_index);
-        let reduced_index = index % reduced_max_index;
-
-        counter += 1;
-        if !reduced_indices.contains(&reduced_index) {
-            reduced_indices.push(reduced_index);
+        if !indices.contains(&index) {
             indices.push(index);
-        };
+        }
+        counter += 1;
     }
 
     indices
+}
+
+// Have the range of the indices
+pub fn reduce_indices(indices: &mut Vec<usize>, max_index: usize) {
+    indices.iter_mut().for_each(|index| {
+        if max_index == 1 {
+            *index = 0;
+        } else {
+            *index = *index % max_index;
+        }
+    });
+}
+
+pub fn get_point_indices(indices: &[usize]) -> (Vec<usize>, Vec<usize>, Vec<usize>) {
+    let a_indices = indices.to_vec();
+    let b_indices = indices
+        .iter()
+        .map(|index| (indices.len() / 2) + index)
+        .collect::<Vec<usize>>();
+    let c_indices = indices.to_vec();
+
+    (a_indices, b_indices, c_indices)
 }

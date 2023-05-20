@@ -1,273 +1,150 @@
+#![allow(non_snake_case)]
+
 use super::unipoly::UniPoly;
-use super::utils::sample_indices;
-use super::FriEvalProof;
+use super::utils::{reduce_indices, sample_indices};
+use super::{BatchedPolyEvalProof, FRIConfig};
 use crate::transcript::Transcript;
 use pasta_curves::arithmetic::FieldExt;
-use pasta_curves::group::ff::PrimeField;
 
-pub struct FriVerifier<F: PrimeField<Repr = [u8; 32]> + FieldExt> {
-    domain: Vec<F>,
-    domain_reduced: Vec<F>,
-    expansion_factor: usize, // (i.e. expansion factor) (info bits) / (total bits)
-    num_colinearity_checks: usize,
+pub struct FRIPolyCommitVerifier<F>
+where
+    F: FieldExt<Repr = [u8; 32]>,
+{
+    config: FRIConfig<F>,
 }
 
-impl<F: FieldExt<Repr = [u8; 32]>> FriVerifier<F> {
-    pub fn new(max_degree: usize, num_rounds: usize) -> Self {
-        // TODO: Allow arbitrary degree
-        assert!(max_degree.is_power_of_two());
-
-        // Are these params OK?
-        let expansion_factor = 2;
-        let num_colinearity_checks = 2;
-
-        let root_of_unity = F::root_of_unity();
-        let root_of_unity_log_2 = F::S;
-
-        let domain_order = (max_degree * expansion_factor).next_power_of_two();
-
-        // Generator for the subgroup with order _subgroup_order_ in the field
-        let domain_generator = root_of_unity.pow(&[
-            2u32.pow(32 - ((domain_order as f64).log2() as u32)) as u64,
-            0,
-            0,
-            0,
-        ]);
-
-        let domain = (0..domain_order)
-            .map(|i| domain_generator.pow(&[i as u64, 0, 0, 0]))
-            .collect::<Vec<F>>();
-
-        let final_domain_size = domain.len() / (2usize.pow(num_rounds as u32));
-        let final_domain_generator = root_of_unity.pow(&[
-            2u32.pow(32 - ((final_domain_size as f64).log2() as u32)) as u64,
-            0,
-            0,
-            0,
-        ]);
-        let domain_reduced = (0..final_domain_size)
-            .map(|i| final_domain_generator.pow(&[i as u64, 0, 0, 0]))
-            .collect::<Vec<F>>();
-
-        Self {
-            domain,
-            domain_reduced,
-            expansion_factor,
-            num_colinearity_checks,
-        }
+impl<F> FRIPolyCommitVerifier<F>
+where
+    F: FieldExt<Repr = [u8; 32]>,
+{
+    pub fn new(config: FRIConfig<F>) -> Self {
+        Self { config }
     }
 
-    /*
-    pub fn verify_deg(&self, proof: FriProof<F>, com: F) {
-        let mut transcript =
-            Transcript::<F>::new(b"Fast Reed-Solomon Interactive Oracle Proof of Proximity");
+    pub fn batch_verify(&self, proof: &BatchedPolyEvalProof<F>, transcript: &mut Transcript<F>) {
+        // Compute the challenges of the weighted sum
+        let num_rounds = self.config.num_rounds();
+        let mut challenge_weights = Vec::with_capacity(proof.poly_degrees.len());
 
-        let final_codeword = proof.reduced_codeword;
-        let interpolant = UniPoly::interpolate(&self.domain_reduced, &final_codeword);
+        for i in 0..proof.poly_openings[0].len() {
+            // Append the commitment to the polynomial to the transcript
+            transcript.append_fe(&proof.poly_openings[0][i].0.root);
 
-        let degree = if final_codeword.len() == 1 {
-            0
-        } else {
-            (final_codeword.len() / self.expansion_factor)
-        };
+            // Get the evaluation challenges
+            let _z = transcript.challenge_fe();
+            assert_eq!(proof.z[i], _z);
 
-        assert_eq!(interpolant.degree(), degree);
+            // Get the random weights
+            challenge_weights.push((transcript.challenge_fe(), transcript.challenge_fe()))
+        }
 
-        let domain_length = self.domain.len();
-
-        let mut indices = sample_indices(
-            self.num_colinearity_checks,
-            domain_length,
-            domain_length / 2usize.pow(proof.queries.len() as u32),
-            &mut transcript,
-        );
-
-        for (i, layer) in proof.queries.iter().enumerate() {
-            assert!(
-                layer.openings.len() == self.num_colinearity_checks,
-                "Invalid number of colinearity checks"
-            );
-
-            // Halve the range of the indices
-            indices = indices
-                .iter()
-                .map(|index| index % (domain_length / 2 >> (i + 1)))
-                .collect::<Vec<usize>>();
-
-            let a_indices = indices.clone();
-            let b_indices = indices
-                .iter()
-                .map(|index| (domain_length / 2 >> (i + 1)) + index)
-                .collect::<Vec<usize>>();
-            let c_indices = indices.clone();
-
-            // Colinearity checks
-            for (j, (a, b, c)) in layer.openings.iter().enumerate() {
-                let a_x = self.domain[a_indices[j]];
-                let b_x = self.domain[b_indices[j]];
-                let c_x = self.domain[c_indices[j]];
-
-                let a_y = a.leaf * a_x;
-                let b_y = b.leaf * b_x;
-                let c_y = c.leaf * c_x;
-
-                // Check that (a_x, a_y), (b_x, b_y) and (c_x, c_y) are on a straight line.
-                let coeff = (a_y - b_y) * (a_x - b_x).invert().unwrap();
-                let intercept = a_y - coeff * a_x;
-                assert!(c_y == coeff * c_x + intercept);
-
-                // Check Merkle proofs
-
-                a.verify();
-                b.verify();
-                c.verify();
-
-                // Check that the root is correct
-                assert_eq!(
-                    a.root, b.root,
-                    "Roots of the two Merkle proofs are not equal"
-                );
-
-                if i == 0 && j == 0 {
-                    // TODO: Uncomment this
-                    // assert_eq!(c.root, com, "c.root != com");
-                } else if j > 0 {
-                    assert_eq!(
-                        layer.openings[j - 1].0.root,
-                        c.root,
-                        "a_prev.root != c.root"
-                    );
-
-                    assert_eq!(
-                        layer.openings[j - 1].1.root,
-                        c.root,
-                        "b_prev.root != c.root"
-                    );
-                }
+        let mut challenges = Vec::with_capacity(num_rounds);
+        for i in 0..(num_rounds - 1) {
+            // Append the commitment to the batched quotient polynomial to the transcript,
+            // and get the challenge value
+            if i != 0 {
+                transcript.append_fe(&proof.openings[i][0].1.root);
             }
-        }
-    }
-     */
-    pub fn verify_eval(&self, proof: &FriEvalProof<F>, transcript: &mut Transcript<F>) {
-        let root = &proof.q_ld_proof.queries[0].q_openings[0].0.root;
 
-        let final_codeword = &proof.q_ld_proof.reduced_codeword;
-        let interpolant = UniPoly::interpolate(&self.domain_reduced, &final_codeword);
-
-        // TODO Append all intermidiate Merkle roots to the transcript
-        for i in 0..proof.q_ld_proof.queries.len() {
-            transcript.append_fe(&proof.q_ld_proof.queries[i].q_openings[0].0.root);
-            transcript.challenge_fe();
+            challenges.push(transcript.challenge_fe());
         }
 
-        let degree = if final_codeword.len() == 1 {
-            0
-        } else {
-            (final_codeword.len() / self.expansion_factor) - 1
-        };
+        transcript.append_fe(&proof.openings[num_rounds - 2][0].2.root);
+        let _x = transcript.challenge_fe();
 
+        let reduced_domain = &self.config.L[self.config.L.len() - 1];
+        assert_eq!(reduced_domain.len(), proof.reduced_codeword.len());
+
+        // Check that the final codeword corresponds to a low-degree polynomial
+        let interpolant = UniPoly::interpolate(&reduced_domain, &proof.reduced_codeword);
+        let degree = (reduced_domain.len() / self.config.R) - 1;
         assert_eq!(interpolant.degree(), degree);
 
-        let domain_length = self.domain.len();
+        let mut indices =
+            sample_indices(self.config.num_queries, self.config.L[0].len(), transcript);
 
-        let mut indices = sample_indices(
-            self.num_colinearity_checks,
-            domain_length,
-            domain_length / 2usize.pow((proof.q_ld_proof.queries.len() - 1) as u32),
-            transcript,
-        );
+        for i in 0..(num_rounds - 1) {
+            reduce_indices(&mut indices, self.config.L[i + 1].len());
+            for (j, openings) in proof.openings[i].iter().enumerate() {
+                let (alpha_0_opening, alpha_1_opening, beta_opening) = openings;
+                let L_i = &self.config.L[i];
+                let L_i_next = &self.config.L[i + 1];
+                let index = indices[j];
+                let s_0 = L_i[index];
+                let s_1 = L_i[index + (L_i.len() / 2)];
+                let y = L_i_next[index];
+                assert_eq!(y, s_0 * s_0);
+                assert_eq!(y, s_1 * s_1);
 
-        for (i, layer) in proof.q_ld_proof.queries.iter().enumerate() {
-            assert!(
-                layer.q_openings.len() == self.num_colinearity_checks,
-                "Invalid number of colinearity checks"
-            );
+                let alpha_0 = alpha_0_opening.leaf;
+                let alpha_1 = alpha_1_opening.leaf;
+                let beta = beta_opening.leaf;
 
-            // Halve the range of the indices
-            indices = indices
-                .iter()
-                .map(|index| index % (domain_length / 2 >> i))
-                .collect::<Vec<usize>>();
+                let (coeff, intercept) =
+                    if i == 0 {
+                        // Interpolate by evaluating the weighted sum
+                        let mut weighted_alpha_0 = F::zero();
+                        let mut weighted_alpha_1 = F::zero();
 
-            let a_indices = indices.clone();
-            let b_indices = indices
-                .iter()
-                .map(|index| (domain_length / 2 >> i) + index)
-                .collect::<Vec<usize>>();
-            let c_indices = indices.clone();
+                        for (l, poly_opening) in proof.poly_openings[j].iter().enumerate() {
+                            poly_opening.0.verify();
+                            poly_opening.1.verify();
 
-            let y = proof.y;
-            let z = proof.z;
-            // Colinearity checks
-            for j in 0..layer.q_openings.len() {
-                let a_x = self.domain[a_indices[j]];
-                let b_x = self.domain[b_indices[j]];
-                let c_x = self.domain[c_indices[j]];
+                            assert_eq!(poly_opening.0.root, poly_opening.1.root);
 
-                let q_openings = &layer.q_openings[j];
-                let f_openings = &layer.f_openings[j];
+                            let alpha_0_x = self.config.L[0][index];
+                            let alpha_1_x = self.config.L[0][index + (L_i.len() / 2)];
 
-                // a_y = q(a_x) = (f(a_x) - y) (a_x - z)
-                //                let a_y = a.leaf;
-                let a_y = (f_openings.0.leaf - y) * (a_x - z).invert().unwrap();
-                let b_y = (f_openings.1.leaf - y) * (b_x - z).invert().unwrap();
-                let c_y = (f_openings.2.leaf - y) * (c_x - z).invert().unwrap();
+                            let alpha_0 = (poly_opening.0.leaf - proof.y[l])
+                                * (alpha_0_x - proof.z[l]).invert().unwrap();
+                            let alpha_1 = (poly_opening.1.leaf - proof.y[l])
+                                * (alpha_1_x - proof.z[l]).invert().unwrap();
 
-                println!(
-                    "v q(x) {:?}",
-                    (f_openings.0.leaf - y) * (a_x - z).invert().unwrap()
-                );
+                            let challenge_weight = &challenge_weights[l];
 
-                let c_x = self.domain[c_indices[j]];
+                            let poly_degree = proof.poly_degrees[l];
+                            let pad_degree =
+                                (poly_degree + 2).next_power_of_two() - poly_degree - 1;
+                            // Compute w^{alpha_i}^{k-d-1}
+                            let alpha_0_x_powered =
+                                self.config.L[0][index].pow(&[pad_degree as u64, 0, 0, 0]);
+                            // Compute w^{alpha_i}^{k-d-1}
+                            let alpha_1_x_powered = self.config.L[0][index + (L_i.len() / 2)]
+                                .pow(&[pad_degree as u64, 0, 0, 0]);
 
-                let a = &q_openings.0;
-                let b = &q_openings.1;
-                let c = &q_openings.2;
+                            weighted_alpha_0 += alpha_0 * challenge_weight.0
+                                + alpha_0 * alpha_0_x_powered * challenge_weight.1;
 
-                assert_eq!(a_y, a.leaf);
-                assert_eq!(b_y, b.leaf);
-                assert_eq!(c_y, c.leaf);
+                            weighted_alpha_1 += alpha_1 * challenge_weight.0
+                                + alpha_1 * alpha_1_x_powered * challenge_weight.1;
+                        }
 
-                // Check that (a_x, a_y), (b_x, b_y) and (c_x, c_y) are on a straight line.
-                let coeff = (a_y - b_y) * (a_x - b_x).invert().unwrap();
-                let intercept = a_y - coeff * a_x;
-                assert_eq!(c_y, coeff * c_x + intercept);
+                        // Interpolate the points (s_0, alpha_0) (s_1, alpha_1)
+                        let coeff =
+                            (weighted_alpha_0 - weighted_alpha_1) * (s_0 - s_1).invert().unwrap();
+                        let intercept = weighted_alpha_0 - coeff * s_0;
 
-                // Check Merkle proofs
+                        (coeff, intercept)
+                    } else {
+                        // Interpolate the points (s_0, alpha_0) (s_1, alpha_1)
+                        let coeff = (alpha_0 - alpha_1) * (s_0 - s_1).invert().unwrap();
+                        let intercept = alpha_0 - coeff * s_0;
+                        (coeff, intercept)
+                    };
 
-                f_openings.0.verify();
-                f_openings.1.verify();
-                f_openings.2.verify();
-
-                assert_eq!(f_openings.0.root, proof.f_comm);
-                assert_eq!(f_openings.1.root, proof.f_comm);
-                assert_eq!(f_openings.2.root, proof.f_comm);
-
-                a.verify();
-                b.verify();
-                c.verify();
-
-                // Check that the root is correct
                 assert_eq!(
-                    a.root, b.root,
-                    "Roots of the two Merkle proofs are not equal"
+                    beta,
+                    coeff * challenges[i] + intercept,
+                    "failed at round = {}",
+                    i
                 );
 
-                if i == 0 && j == 0 {
-                    assert_eq!(c.root, *root, "c.root != root");
-                } else if j > 0 {
-                    assert_eq!(
-                        layer.q_openings[j - 1].0.root,
-                        c.root,
-                        "a_prev.root != c.root"
-                    );
+                assert!(alpha_0_opening.verify());
+                assert!(alpha_1_opening.verify());
+                assert!(beta_opening.verify());
 
-                    assert_eq!(
-                        layer.q_openings[j - 1].1.root,
-                        c.root,
-                        "b_prev.root != c.root"
-                    );
-                }
+                // Check that the alpha_0 and alpha_1 come from the same oracle
+                assert_eq!(alpha_0_opening.root, alpha_1_opening.root);
             }
         }
     }
