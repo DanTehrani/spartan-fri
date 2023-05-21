@@ -37,7 +37,9 @@ impl<F: FieldExt> PolyCommitment<F> for FRIMultilinearPCS<F> {
     type Commitment = F; // tmp
     type Opening = F; // tmp
     fn new() -> Self {
-        todo!()
+        Self {
+            _marker: PhantomData,
+        }
     }
 
     fn commit(&self, evals: &[F]) -> Self::Commitment {
