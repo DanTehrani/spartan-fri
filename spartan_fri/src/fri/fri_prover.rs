@@ -143,12 +143,14 @@ where
         // Store the codewords to open later
         let mut f_codewords = Vec::with_capacity(polys.len());
 
+        let max_poly_degree = polys.iter().map(|p| p.degree()).max().unwrap();
+        let k = (max_poly_degree + 2).next_power_of_two();
+
         let mut z = Vec::with_capacity(polys.len());
         let mut y = Vec::with_capacity(polys.len());
         // Compute the codeword of g(X)
         for i in 0..polys.len() {
             let poly = &polys[i];
-            let k = (poly.degree() + 2).next_power_of_two();
 
             let evals = poly.eval_fft(&self.config.L[0]);
             f_codewords.push(evals.clone());

@@ -86,6 +86,9 @@ where
                         let mut weighted_alpha_0 = F::zero();
                         let mut weighted_alpha_1 = F::zero();
 
+                        let max_poly_degree = proof.poly_degrees.iter().max().unwrap();
+                        let k = (max_poly_degree + 1).next_power_of_two();
+
                         for (l, poly_opening) in proof.poly_openings[j].iter().enumerate() {
                             poly_opening.0.verify();
                             poly_opening.1.verify();
@@ -102,9 +105,7 @@ where
 
                             let challenge_weight = &challenge_weights[l];
 
-                            let poly_degree = proof.poly_degrees[l];
-                            let pad_degree =
-                                (poly_degree + 2).next_power_of_two() - poly_degree - 1;
+                            let pad_degree = k - proof.poly_degrees[l] - 1;
                             // Compute w^{alpha_i}^{k-d-1}
                             let alpha_0_x_powered =
                                 self.config.L[0][index].pow(&[pad_degree as u64, 0, 0, 0]);

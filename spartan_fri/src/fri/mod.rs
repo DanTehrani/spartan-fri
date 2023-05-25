@@ -142,8 +142,9 @@ mod tests {
         let folding_factor = 2;
         let final_codeword_size = 1;
 
+        let max_poly_degree = poly_degrees[poly_degrees.len() - 1];
         let fri_config = FRIConfig::<F>::new(
-            (poly_degrees[poly_degrees.len() - 1] + 1).next_power_of_two(),
+            (max_poly_degree + 1).next_power_of_two(),
             expansion_factor,
             folding_factor,
             num_queries,
