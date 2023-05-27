@@ -64,6 +64,7 @@ fn sample_index(random_bytes: [u8; 64], size: usize) -> usize {
 pub fn sample_indices<F: FieldExt<Repr = [u8; 32]>>(
     num_indices: usize,
     max_index: usize,
+    reduced_max_index: usize,
     transcript: &mut Transcript<F>,
 ) -> Vec<usize> {
     let mut indices = Vec::with_capacity(num_indices);

@@ -1,9 +1,10 @@
 use super::utils::hash_two;
-use ff::Field;
+use ark_std::{end_timer, start_timer};
 use pasta_curves::arithmetic::FieldExt;
 
-pub struct MerkleTree<F: FieldExt<Repr = [u8; 32]>> {
-    pub layers: Vec<Vec<F>>, // to root
+#[derive(Clone)]
+pub struct CommittedMerkleTree<F: FieldExt<Repr = [u8; 32]>> {
+    pub layers: Vec<Vec<F>>,
 }
 
 #[derive(Clone, Debug)]
@@ -33,37 +34,16 @@ impl<F: FieldExt<Repr = [u8; 32]>> MerkleProof<F> {
     }
 }
 
-impl<F: FieldExt<Repr = [u8; 32]>> MerkleTree<F> {
-    pub fn new() -> Self {
-        Self { layers: vec![] }
-    }
+impl<F: FieldExt<Repr = [u8; 32]>> CommittedMerkleTree<F> {
+    pub fn from_leaves(leaves: Vec<F>) -> Self {
+        let commit_timer =
+            start_timer!(|| format!("Commit to Merkle tree with leaves {}", leaves.len()));
 
-    fn compute_layers(&mut self, leaves: Vec<F>) -> Vec<F> {
-        self.layers.push(leaves.clone());
-
-        if leaves.len() == 1 {
-            return leaves;
-        }
-
-        let mut parent_nodes = vec![];
-        for i in (0..leaves.len()).step_by(2) {
-            if leaves.len() - 1 == i {
-                // Sibling.
-                let parent = hash_two(&[leaves[i], leaves[i]]);
-                parent_nodes.push(parent);
-            } else {
-                let left = leaves[i];
-                let right = leaves[i + 1];
-                let parent = hash_two(&[left, right]);
-                parent_nodes.push(parent);
-            }
-        }
-        self.compute_layers(parent_nodes)
-    }
-
-    pub fn commit(&mut self, leaves: &[F]) -> F {
         let n = leaves.len();
         assert!(n.is_power_of_two());
+
+        let num_layers = (n as f64).log2() as usize + 1;
+        let mut layers = Vec::with_capacity(num_layers);
 
         // Add a dummy leaf if the number of leaves is odd.
         let mut leaves = leaves.to_vec();
@@ -72,7 +52,7 @@ impl<F: FieldExt<Repr = [u8; 32]>> MerkleTree<F> {
         }
 
         // The first layer is the leaves.
-        self.layers.push(leaves.clone());
+        layers.push(leaves.clone());
 
         while leaves.len() != 1 {
             let mut layer = vec![];
@@ -82,18 +62,32 @@ impl<F: FieldExt<Repr = [u8; 32]>> MerkleTree<F> {
                 let parent = hash_two(&[left, right]);
                 layer.push(parent);
             }
-            self.layers.push(layer.clone());
+            layers.push(layer.clone());
             leaves = layer;
         }
 
-        leaves[0]
+        end_timer!(commit_timer);
+
+        assert_eq!(layers.len(), num_layers);
+        assert_eq!(layers[num_layers - 1].len(), 1);
+
+        Self { layers }
     }
 
-    pub fn open(&self, leaf: F) -> MerkleProof<F> {
-        let m = self.layers.len();
-        // Find the index of the leaf
-        let leaf_index = self.layers[0].iter().position(|&x| x == leaf).unwrap();
+    pub fn root(&self) -> F {
+        self.layers[self.layers.len() - 1][0]
+    }
 
+    pub fn leaves(&self) -> Vec<F> {
+        self.layers[0].clone()
+    }
+
+    pub fn depth(&self) -> usize {
+        self.layers.len()
+    }
+
+    pub fn open_index(&self, leaf_index: usize) -> MerkleProof<F> {
+        let m = self.layers.len();
         let mut sibling_indices = Vec::with_capacity(m);
 
         // Find the indices of the siblings through all layers
@@ -129,11 +123,17 @@ impl<F: FieldExt<Repr = [u8; 32]>> MerkleTree<F> {
 
         MerkleProof {
             root: self.layers.last().unwrap()[0],
-            leaf,
+            leaf: self.layers[0][leaf_index],
             siblings,
             leaf_index,
             tree_depth: self.layers.len() - 1,
         }
+    }
+
+    pub fn open(&self, leaf: F) -> MerkleProof<F> {
+        // Find the index of the leaf
+        let leaf_index = self.layers[0].iter().position(|&x| x == leaf).unwrap();
+        self.open_index(leaf_index)
     }
 }
 
@@ -147,13 +147,12 @@ mod tests {
     #[test]
     fn test_tree() {
         let num_leaves = 2usize.pow(5);
-        let mut tree = MerkleTree::new();
 
         let leaves = (0..num_leaves)
             .map(|x| F::from(x as u64))
             .collect::<Vec<F>>();
 
-        tree.commit(&leaves);
+        let tree = CommittedMerkleTree::from_leaves(leaves.clone());
 
         for i in 0..leaves.len() {
             let proof = tree.open(leaves[i]);

@@ -8,47 +8,61 @@ mod utils;
 use pasta_curves::arithmetic::FieldExt;
 use tree::MerkleProof;
 
-use crate::transcript::Transcript;
-pub use fri_prover::FRIPolyCommitProver;
-pub use fri_verifier::FRIPolyCommitVerifier;
+pub use fri_prover::FRIMLPolyCommitProver;
+pub use fri_verifier::FRIMLPolyCommitVerifier;
 pub use unipoly::UniPoly;
 
-use crate::PolyCommitment;
-
-pub struct BatchedPolyEvalProof<F>
+#[derive(Clone)]
+pub struct FirstRoundBoundedPolyOpenings<F>
 where
     F: FieldExt<Repr = [u8; 32]>,
 {
-    pub openings: Vec<Vec<(MerkleProof<F>, MerkleProof<F>, MerkleProof<F>)>>,
-    pub reduced_codeword: Vec<F>,
-    pub poly_openings: Vec<Vec<(MerkleProof<F>, MerkleProof<F>)>>,
-    pub poly_degrees: Vec<usize>,
-    pub z: Vec<F>,
-    pub y: Vec<F>,
+    pub opening_at_s0: MerkleProof<F>,
+    pub opening_at_s1: MerkleProof<F>,
 }
-use std::marker::PhantomData;
 
 #[derive(Clone)]
-pub struct FRIMultilinearPCS<F> {
-    _marker: PhantomData<F>,
+pub struct QueryFirstRound<F>
+where
+    F: FieldExt<Repr = [u8; 32]>,
+{
+    // Openings of f_0(\s_0), f_1(\s_0), ... f_{u-1}(s_0)
+    // and f_0(\s_1), f_1(\s_1), ... f_{u-1}(s_1)
+    pub bounded_poly_openings: Vec<FirstRoundBoundedPolyOpenings<F>>,
+    // Openings of g_1(t)
+    pub g_1_opening_at_t: MerkleProof<F>,
 }
 
-impl<F: FieldExt> PolyCommitment<F> for FRIMultilinearPCS<F> {
-    type Commitment = F; // tmp
-    type Opening = F; // tmp
-    fn new() -> Self {
-        Self {
-            _marker: PhantomData,
-        }
-    }
+#[derive(Clone)]
+pub struct RoundQueries<F>
+where
+    F: FieldExt<Repr = [u8; 32]>,
+{
+    pub queries: Vec<Query<F>>,
+}
 
-    fn commit(&self, evals: &[F]) -> Self::Commitment {
-        todo!()
-    }
+#[derive(Clone)]
+pub struct Query<F>
+where
+    F: FieldExt<Repr = [u8; 32]>,
+{
+    pub opening_at_s0: MerkleProof<F>,
+    pub opening_at_s1: MerkleProof<F>,
+    pub opening_at_t: MerkleProof<F>,
+}
 
-    fn open(&self, point: &[F]) -> Self::Opening {
-        todo!()
-    }
+#[derive(Clone)]
+pub struct MLPolyEvalProof<F>
+where
+    F: FieldExt<Repr = [u8; 32]>,
+{
+    pub queries_first_round: Vec<QueryFirstRound<F>>,
+    pub queries: Vec<RoundQueries<F>>,
+    pub reduced_codeword: Vec<F>,
+    pub f_i_evals_beta: Vec<(F, F)>,
+    pub f_i_evals_beta_squared: Vec<F>,
+    pub y: F,
+    pub x: Vec<F>,
 }
 
 #[derive(Clone)]
@@ -56,7 +70,7 @@ pub struct FRIConfig<F>
 where
     F: FieldExt<Repr = [u8; 32]>,
 {
-    pub R: usize,
+    pub expansion_factor: usize,
     pub folding_factor: usize,
     pub num_queries: usize,
     pub L: Vec<Vec<F>>,
@@ -77,7 +91,7 @@ where
         let mut domain_order = (poly_degree * expansion_factor).next_power_of_two();
         let mut L = vec![];
 
-        let mut codeword_size = poly_degree;
+        let mut codeword_size = poly_degree * expansion_factor;
         while codeword_size > final_codeword_size {
             // Generator for the subgroup with order _subgroup_order_ in the field
             let domain_generator = root_of_unity.pow(&[
@@ -96,7 +110,7 @@ where
         }
 
         Self {
-            R: expansion_factor,
+            expansion_factor,
             folding_factor,
             num_queries,
             L,
@@ -125,48 +139,42 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::unipoly::UniPoly;
     use super::*;
-
+    use crate::spartan::polynomial::ml_poly::MlPoly;
+    use crate::transcript::Transcript;
     type F = pasta_curves::Fp;
 
     #[test]
-    fn test_fri_batch_poly_commit() {
-        let num_polys = 5;
-        let poly_degrees = (0..num_polys)
-            .map(|i| 2usize.pow((i + 1) as u32))
-            .collect::<Vec<usize>>();
+    fn test_ml_poly_prove() {
+        let m = 5;
+        let n = 2usize.pow(m);
 
-        let num_queries = 10;
+        let poly_degree = n;
+        let num_queries = 30;
         let expansion_factor = 2;
         let folding_factor = 2;
         let final_codeword_size = 1;
 
-        let max_poly_degree = poly_degrees[poly_degrees.len() - 1];
+        let evals = (0..n).map(|i| F::from(i as u64)).collect::<Vec<F>>();
+        let mut ml_poly = MlPoly::new(evals);
+        ml_poly.compute_coeffs();
+
         let fri_config = FRIConfig::<F>::new(
-            (max_poly_degree + 1).next_power_of_two(),
+            poly_degree,
             expansion_factor,
             folding_factor,
             num_queries,
             final_codeword_size,
         );
 
-        let polys = (0..num_polys)
-            .map(|i| {
-                UniPoly::new(
-                    (0..(poly_degrees[i] + 1))
-                        .map(|j| F::from((j + i) as u64))
-                        .collect::<Vec<F>>(),
-                )
-            })
-            .collect::<Vec<UniPoly<F>>>();
+        let eval_at = vec![F::from(33); m as usize];
 
-        let fri_prover = FRIPolyCommitProver::new(fri_config.clone());
-        let mut transcript = Transcript::<F>::new(b"test_fri_batch_poly_commit");
-        let proof = fri_prover.batch_prove(&polys, &mut transcript);
+        let mut prover_transcript = Transcript::<F>::new(b"test");
+        let fri_prover = FRIMLPolyCommitProver::new(fri_config.clone());
+        let proof = fri_prover.prove_eval(&ml_poly, &eval_at, &mut prover_transcript);
 
-        let fri_verifier = FRIPolyCommitVerifier::new(fri_config);
-        let mut transcript = Transcript::<F>::new(b"test_fri_batch_poly_commit");
-        fri_verifier.batch_verify(&proof, &mut transcript);
+        let mut verifier_transcript = Transcript::<F>::new(b"test");
+        let fri_verifier = FRIMLPolyCommitVerifier::new(fri_config);
+        fri_verifier.verify(&proof, &mut verifier_transcript);
     }
 }

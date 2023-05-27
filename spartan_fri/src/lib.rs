@@ -1,5 +1,5 @@
 #![allow(non_snake_case)]
-use fri::FRIMultilinearPCS;
+use fri::FRIMLPolyCommitProver;
 use pasta_curves::arithmetic::FieldExt;
 use spartan::prover::SpartanProver;
 use spartan::verifier::SpartanVerifier;
@@ -24,8 +24,8 @@ pub trait PolyCommitment<F: FieldExt>: Clone {
 // Re-exports
 // #######################
 
-pub type SpartanFRIProver<F> = SpartanProver<F, FRIMultilinearPCS<F>>;
-pub type SpartanFRIProof<F> = SpartanProof<F, FRIMultilinearPCS<F>>;
+pub type SpartanFRIProver<F> = SpartanProver<F, FRIMLPolyCommitProver<F>>;
+pub type SpartanFRIProof<F> = SpartanProof<F, FRIMLPolyCommitProver<F>>;
 pub use r1cs::R1CS;
 pub use spartan::SpartanPP;
 
