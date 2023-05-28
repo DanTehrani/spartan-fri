@@ -51,8 +51,10 @@ where
         let one = F::from(1);
 
         let n = domain.len();
-        let mut folded_codeword = Vec::with_capacity(n / 2);
-        for i in 0..(n / 2) {
+
+        let folded_codeword_size = n / self.config.folding_factor;
+        let mut folded_codeword = Vec::with_capacity(folded_codeword_size);
+        for i in 0..folded_codeword_size {
             // f*(w^2i) = 1/2 * ((1 + alpha * w^-i) * f(w^i) + (1 - alpha * w^-i) * f(-w^i))
             // w^(n/2) = -1
             // -w^i = domain[i + n/2]
@@ -61,7 +63,7 @@ where
 
             let f_star_eval = two_inv
                 * ((one + alpha * omega_pow_minus_i) * codeword[i]
-                    + (one - alpha * omega_pow_minus_i) * codeword[i + (n / 2)]);
+                    + (one - alpha * omega_pow_minus_i) * codeword[i + folded_codeword_size]);
             folded_codeword.push(f_star_eval);
         }
 
@@ -317,6 +319,9 @@ where
 
         // Compute the degree-1 polynomial from the indices
 
+        let next_layer_size = codeword_next.len();
+        let folding_factor = self.config.folding_factor as u64;
+
         for index in indices {
             let e3 = codeword_next[*index];
 
@@ -325,10 +330,10 @@ where
 
             // Sanity check
             let s_0 = self.config.L[0][*index];
-            let s_1 = self.config.L[0][*index + (codeword.len() / 2)];
+            let s_1 = self.config.L[0][*index + next_layer_size];
             let y = self.config.L[1][*index];
-            assert_eq!(y, s_0 * s_0);
-            assert_eq!(y, s_1 * s_1);
+            assert_eq!(y, s_0.pow([folding_factor, 0, 0, 0]));
+            assert_eq!(y, s_1.pow([folding_factor, 0, 0, 0]));
 
             let mut openings_at_s0 = Vec::with_capacity(f_trees.len());
             let mut openings_at_s1 = Vec::with_capacity(f_trees.len());
@@ -371,6 +376,7 @@ where
 
         // We skip the first round because the verifier derives the opening
         // from the oracle of the polynomials that consists of g(X)
+        let folding_factor = self.config.folding_factor as u64;
         for i in 0..(num_rounds - 2) {
             let codeword = codewords[i].clone();
             let codeword_next = codewords[i + 1].clone();
@@ -394,8 +400,8 @@ where
                 let s_1 = self.config.L[i + 1][index + (codeword.len() / 2)];
                 let y = self.config.L[i + 2][index];
 
-                assert_eq!(y, s_0 * s_0);
-                assert_eq!(y, s_1 * s_1);
+                assert_eq!(y, s_0.pow([folding_factor, 0, 0, 0]));
+                assert_eq!(y, s_1.pow([folding_factor, 0, 0, 0]));
 
                 let opening_at_s0 = tree.open(e0);
                 let opening_at_s1 = tree.open(e1);

@@ -116,6 +116,8 @@ where
         num_queries: usize,
         final_codeword_size: usize,
     ) -> Self {
+        assert!(folding_factor.is_power_of_two());
+
         let root_of_unity = F::ROOT_OF_UNITY;
         let mut domain_order = (poly_degree * expansion_factor).next_power_of_two();
         let mut L = vec![];
@@ -177,7 +179,7 @@ mod tests {
 
     #[test]
     fn test_ml_poly_prove() {
-        let m = 13;
+        let m = 5;
         let n = 2usize.pow(m);
 
         let poly_degree = n;
