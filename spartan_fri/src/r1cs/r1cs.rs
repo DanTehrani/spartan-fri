@@ -1,4 +1,5 @@
-use pasta_curves::arithmetic::FieldExt;
+use crate::FieldExt;
+use ff::Field;
 
 #[derive(Clone)]
 pub struct Matrix<F>(Vec<(usize, usize, F)>)
@@ -10,7 +11,7 @@ where
     F: FieldExt,
 {
     pub fn mul_vector(&self, num_rows: usize, vec: &[F]) -> Vec<F> {
-        let mut result = vec![F::zero(); num_rows];
+        let mut result = vec![F::ZERO; num_rows];
         for i in 0..self.0.len() {
             let row = self.0[i].0;
             let col = self.0[i].1;
@@ -41,7 +42,7 @@ where
 {
     pub fn hadamard_prod(a: &[F], b: &[F]) -> Vec<F> {
         assert_eq!(a.len(), b.len());
-        let mut result = vec![F::zero(); a.len()];
+        let mut result = vec![F::ZERO; a.len()];
         for i in 0..a.len() {
             result[i] = a[i] * b[i];
         }
@@ -82,8 +83,8 @@ where
             // we apply multiplication since the Hadamard product is computed for Az ・ Bz,
 
             // We only _enable_ a single variable in each constraint.
-            A.push((i, A_col, F::one()));
-            B.push((i, B_col, F::one()));
+            A.push((i, A_col, F::ONE));
+            B.push((i, B_col, F::ONE));
             C.push((i, C_col, (z[A_col] * z[B_col]) * z[C_col].invert().unwrap()));
         }
 

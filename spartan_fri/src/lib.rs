@@ -1,18 +1,24 @@
 #![allow(non_snake_case)]
+use ff::{FromUniformBytes, PrimeField};
 use fri::FRIMLPolyCommitProver;
-use pasta_curves::arithmetic::FieldExt;
+use pasta_curves::Fp;
+use serde::Serialize;
 use spartan::prover::SpartanProver;
 use spartan::verifier::SpartanVerifier;
 
-mod fri;
+pub mod fri;
 mod r1cs;
-mod spartan;
-mod transcript;
+pub mod spartan;
+pub mod transcript;
 
 use spartan::SpartanProof;
 
+pub trait FieldExt: FromUniformBytes<64, Repr = [u8; 32]> + Serialize {}
+
+impl FieldExt for Fp {}
+
 // Commitment scheme for multilinear polynomials
-pub trait PolyCommitment<F: FieldExt>: Clone {
+pub trait PolyCommitment<F: PrimeField>: Clone {
     type Commitment;
     type Opening;
     fn new() -> Self;

@@ -7,8 +7,8 @@ pub mod verifier;
 use crate::r1cs::R1CS;
 use crate::spartan::sumcheck::{SCPhase1Proof, SCPhase2Proof};
 use crate::transcript::Transcript;
+use crate::FieldExt;
 use crate::PolyCommitment;
-use pasta_curves::arithmetic::FieldExt;
 use std::marker::PhantomData;
 
 // Public parameters for the Spartan IOP
@@ -19,7 +19,7 @@ pub struct SpartanPP<F: FieldExt, PCS: PolyCommitment<F>> {
     pcs: PCS,
 }
 
-impl<F: FieldExt<Repr = [u8; 32]>, PCS: PolyCommitment<F>> SpartanPP<F, PCS> {
+impl<F: FieldExt, PCS: PolyCommitment<F>> SpartanPP<F, PCS> {
     pub fn new(r1cs: R1CS<F>, label: &'static [u8]) -> Self {
         let transcript = Transcript::<F>::new(label);
         let pcs = PCS::new();
@@ -41,6 +41,7 @@ pub struct SpartanProof<F: FieldExt, PCS: PolyCommitment<F>> {
 mod tests {
     use super::*;
     use crate::{PolyCommitment, SpartanProver, SpartanVerifier, R1CS};
+    use ff::Field;
     use pasta_curves::Fp;
 
     type F = Fp;
@@ -55,11 +56,11 @@ mod tests {
         }
 
         fn commit(&self, evals: &[F]) -> Self::Commitment {
-            F::zero()
+            F::ZERO
         }
 
         fn open(&self, point: &[F]) -> Self::Opening {
-            F::zero()
+            F::ZERO
         }
     }
 

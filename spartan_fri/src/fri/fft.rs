@@ -1,9 +1,11 @@
-use pasta_curves::{arithmetic::FieldExt, group::ff::PrimeField};
+use crate::FieldExt;
+use ff::Field;
+use ff::PrimeField;
 use std::vec;
 
 pub fn fft<F>(coeffs: &[F], domain: &[F]) -> Vec<F>
 where
-    F: FieldExt<Repr = [u8; 32]>,
+    F: FieldExt,
 {
     assert!(coeffs.len() == domain.len());
     if coeffs.len() == 1 {
@@ -59,7 +61,7 @@ where
     return evals_L;
 }
 
-pub fn ifft<F: PrimeField<Repr = [u8; 32]> + FieldExt>(domain: &[F], evals: &[F]) -> Vec<F> {
+pub fn ifft<F: FieldExt + Field>(domain: &[F], evals: &[F]) -> Vec<F> {
     let mut coeffs = vec![];
     let len_mod_inv = F::from(domain.len() as u64).invert().unwrap();
     let vals = fft(&evals, &domain);
@@ -93,7 +95,7 @@ mod tests {
 
         let mut domain = vec![];
 
-        let root_of_unity = Fp::root_of_unity();
+        let root_of_unity = Fp::ROOT_OF_UNITY;
 
         let subgroup_order = (coeffs.len() * 2).next_power_of_two();
 

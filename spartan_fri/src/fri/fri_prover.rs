@@ -6,21 +6,21 @@ use crate::fri::{
 };
 use crate::spartan::polynomial::ml_poly::MlPoly;
 use crate::transcript::Transcript;
+use crate::FieldExt;
 use crate::PolyCommitment;
 use ark_std::{end_timer, start_timer};
-use pasta_curves::arithmetic::FieldExt;
 
 #[derive(Clone)]
 pub struct FRIMLPolyCommitProver<F>
 where
-    F: FieldExt<Repr = [u8; 32]>,
+    F: FieldExt,
 {
     pub config: FRIConfig<F>,
 }
 
 impl<F> PolyCommitment<F> for FRIMLPolyCommitProver<F>
 where
-    F: FieldExt<Repr = [u8; 32]>,
+    F: FieldExt,
 {
     type Commitment = Vec<F>;
     type Opening = Vec<F>;
@@ -39,7 +39,7 @@ where
 
 impl<F> FRIMLPolyCommitProver<F>
 where
-    F: FieldExt<Repr = [u8; 32]>,
+    F: FieldExt,
 {
     pub fn new(config: FRIConfig<F>) -> Self {
         Self { config }
@@ -82,7 +82,9 @@ where
         let m = x.len();
 
         // Evaluate the polynomial the point (x_0, ..., x_{m-1})
+        let eval_timer = start_timer!(|| "Eval");
         let y = ml_poly.eval(x);
+        end_timer!(eval_timer);
 
         // Commit to the univariate polynomial f(X) which has the
         // same coefficients as the given multilinear polynomial
@@ -110,13 +112,13 @@ where
             let coeffs = even_coeffs
                 .iter()
                 .zip(odd_coeffs.iter())
-                .map(|(e, o)| *e + *o * x[i])
+                .map(|(e, o)| *e + *o * x[i - 1])
                 .collect::<Vec<F>>();
             let f_i = UniPoly::new(coeffs);
 
             // Sanity check
             let f_i_prev = &f_comms[i - 1];
-            assert_eq!(f_i_prev.eval(x[i]), f_i.eval(x[i].square()));
+            assert_eq!(f_i_prev.eval(x[i - 1]), f_i.eval(x[i - 1].square()));
 
             // Commit to f_i(X)
             let f_i_comm = f_i.merkle_commit(&self.config.L[0], transcript);
@@ -175,13 +177,14 @@ where
         // Compute the codeword of g(X),
         // which is the random linear combination of the quotient codewords
         // ##########################################
-        let mut g_codeword = vec![F::zero(); self.config.L[0].len()];
+        let mut g_codeword = vec![F::ZERO; self.config.L[0].len()];
 
         let quotient_poly_max_degree = ml_poly.evals.len() - 1;
         let k = quotient_poly_max_degree.next_power_of_two();
 
         let mut poly_degree = (quotient_codewords[0].len() / self.config.expansion_factor) - 1;
 
+        let derive_quotient_code_word_timer = start_timer!(|| "Derive quotient codeword");
         for i in 0..quotient_codewords.len() {
             // Compute the challenges (i.e. random weights)
             let alpha = transcript.challenge_fe();
@@ -210,6 +213,7 @@ where
                 poly_degree /= 2;
             }
         }
+        end_timer!(derive_quotient_code_word_timer);
 
         // ##########################################
         // Commit phase for g(X)
@@ -218,11 +222,6 @@ where
         let commit_timer = start_timer!(|| "Commit");
         let (codewords, oracles) = self.commit(g_codeword.clone(), transcript);
         end_timer!(commit_timer);
-
-        assert_eq!(
-            codewords.len(),
-            (g_codeword.len() as f64).log2() as usize - 1
-        );
 
         // ##########################################
         // Query phase for g(X)

@@ -2,12 +2,12 @@ use crate::fri::tree::CommittedMerkleTree;
 use crate::transcript::Transcript;
 
 use super::fft::{fft, ifft};
-use pasta_curves::arithmetic::FieldExt;
+use crate::FieldExt;
 
 #[derive(Clone)]
 pub struct CommittedUniPoly<F>
 where
-    F: FieldExt<Repr = [u8; 32]>,
+    F: FieldExt,
 {
     pub coeffs: Vec<F>,
     pub committed_merkle_tree: CommittedMerkleTree<F>,
@@ -15,7 +15,7 @@ where
 
 impl<F> CommittedUniPoly<F>
 where
-    F: FieldExt<Repr = [u8; 32]>,
+    F: FieldExt,
 {
     pub fn to_even_and_odd_coeffs(&self) -> (Vec<F>, Vec<F>) {
         let n = self.coeffs.len() / 2;
@@ -34,7 +34,7 @@ where
     }
 
     pub fn eval(&self, x: F) -> F {
-        let mut result = F::zero();
+        let mut result = F::ZERO;
         for (i, coeff) in self.coeffs.iter().enumerate() {
             result += *coeff * x.pow(&[i as u64, 0, 0, 0]);
         }
@@ -50,14 +50,14 @@ where
 #[derive(Clone)]
 pub struct UniPoly<F>
 where
-    F: FieldExt<Repr = [u8; 32]>,
+    F: FieldExt,
 {
     pub coeffs: Vec<F>,
 }
 
 impl<F> UniPoly<F>
 where
-    F: FieldExt<Repr = [u8; 32]>,
+    F: FieldExt,
 {
     pub fn new(coeffs: Vec<F>) -> Self {
         Self { coeffs } // [x^0, x^1, x^2, x^3...]
@@ -71,7 +71,7 @@ where
         // Pad the coefficients vector with zeros to match the domain size
         let mut padded_coeffs = self.coeffs.clone();
         let mut pad = Vec::with_capacity(domain.len());
-        pad.resize(domain.len() - self.coeffs.len(), F::zero());
+        pad.resize(domain.len() - self.coeffs.len(), F::ZERO);
         padded_coeffs.extend_from_slice(&pad);
 
         // Evaluate with FFT
@@ -79,7 +79,7 @@ where
     }
 
     pub fn eval(&self, x: F) -> F {
-        let mut result = F::zero();
+        let mut result = F::ZERO;
         for (i, coeff) in self.coeffs.iter().enumerate() {
             result += *coeff * x.pow(&[i as u64, 0, 0, 0]);
         }
@@ -93,7 +93,7 @@ where
         let mut degree = 0;
 
         for i in 0..coeffs.len() {
-            if coeffs[i] != F::zero() {
+            if coeffs[i] != F::ZERO {
                 degree = i;
             }
         }
@@ -120,7 +120,7 @@ where
 }
 
 /*
-impl<F: FieldExt<Repr = [> ; 32]>> Div for UniPoly<F {
+impl<F: PrimeField<Repr = [> ; 32]>> Div for UniPoly<F {
     type Output = Self;
 
     fn div(self, rhs: Self) -> Self::Output {
@@ -132,6 +132,7 @@ impl<F: FieldExt<Repr = [> ; 32]>> Div for UniPoly<F {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ff::Field;
     use pasta_curves::group::ff::PrimeField;
     use pasta_curves::Fp;
 
@@ -146,7 +147,7 @@ mod tests {
         ];
 
         let mut domain = vec![];
-        let root_of_unity = Fp::root_of_unity();
+        let root_of_unity = Fp::ROOT_OF_UNITY;
 
         let subgroup_order = (coeffs.len() * 2).next_power_of_two();
 

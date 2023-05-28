@@ -4,15 +4,16 @@ use std::marker::PhantomData;
 use crate::spartan::polynomial::ml_poly::MlPoly;
 use crate::spartan::sumcheck::{SumCheckPhase1, SumCheckPhase2};
 use crate::spartan::{SpartanPP, SpartanProof};
+use crate::FieldExt;
 use crate::PolyCommitment;
-use pasta_curves::arithmetic::FieldExt;
+use ff::Field;
 
 pub struct SpartanProver<F: FieldExt, PCS: PolyCommitment<F>> {
     pp: SpartanPP<F, PCS>,
     _marker: PhantomData<F>,
 }
 
-impl<F: FieldExt<Repr = [u8; 32]>, PCS: PolyCommitment<F>> SpartanProver<F, PCS> {
+impl<F: FieldExt, PCS: PolyCommitment<F>> SpartanProver<F, PCS> {
     pub fn new(pp: SpartanPP<F, PCS>) -> Self {
         Self {
             pp,

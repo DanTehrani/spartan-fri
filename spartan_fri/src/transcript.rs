@@ -1,5 +1,6 @@
+use crate::FieldExt;
+use ff::Field;
 use merlin::Transcript as MerlinTranscript;
-use pasta_curves::arithmetic::FieldExt;
 use std::marker::PhantomData;
 
 #[derive(Clone)]
@@ -8,7 +9,7 @@ pub struct Transcript<F: FieldExt> {
     _marker: PhantomData<F>,
 }
 
-impl<F: FieldExt<Repr = [u8; 32]>> Transcript<F> {
+impl<F: FieldExt> Transcript<F> {
     pub fn new(label: &'static [u8]) -> Self {
         Self {
             transcript_inner: MerlinTranscript::new(label),
@@ -29,7 +30,7 @@ impl<F: FieldExt<Repr = [u8; 32]>> Transcript<F> {
             .map(|i| {
                 let mut bytes = [0u8; 64];
                 self.transcript_inner.challenge_bytes(b"", &mut bytes);
-                F::from_bytes_wide(&bytes)
+                F::from_uniform_bytes(&bytes)
             })
             .collect()
     }
@@ -37,7 +38,7 @@ impl<F: FieldExt<Repr = [u8; 32]>> Transcript<F> {
     pub fn challenge_fe(&mut self) -> F {
         let mut bytes = [0u8; 64];
         self.transcript_inner.challenge_bytes(b"", &mut bytes);
-        F::from_bytes_wide(&bytes)
+        F::from_uniform_bytes(&bytes)
     }
 
     pub fn challenge_bytes(&mut self, bytes: &mut [u8]) {

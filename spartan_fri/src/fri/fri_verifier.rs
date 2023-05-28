@@ -4,18 +4,19 @@ use crate::fri::unipoly::UniPoly;
 use crate::fri::utils::{reduce_indices, sample_indices};
 use crate::fri::{FRIConfig, MLPolyEvalProof, QueryFirstRound};
 use crate::transcript::Transcript;
-use pasta_curves::arithmetic::FieldExt;
+use crate::FieldExt;
+use ff::Field;
 
 pub struct FRIMLPolyCommitVerifier<F>
 where
-    F: FieldExt<Repr = [u8; 32]>,
+    F: FieldExt,
 {
     pub config: FRIConfig<F>,
 }
 
 impl<F> FRIMLPolyCommitVerifier<F>
 where
-    F: FieldExt<Repr = [u8; 32]>,
+    F: FieldExt,
 {
     pub fn new(config: FRIConfig<F>) -> Self {
         Self { config }
@@ -82,8 +83,8 @@ where
 
         // \e0 and e1 openings consists of all openings of the batched polynomials,
         // whereas \beta opening is a single opening to the batched polynomial.
-        let mut weighted_alpha_0 = F::zero();
-        let mut weighted_alpha_1 = F::zero();
+        let mut weighted_alpha_0 = F::ZERO;
+        let mut weighted_alpha_1 = F::ZERO;
         // First, we take the random linear combination of \e0 and \e1 openings
 
         assert_eq!(

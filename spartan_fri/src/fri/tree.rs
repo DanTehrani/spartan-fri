@@ -1,22 +1,21 @@
 use super::utils::hash_two;
-use ark_std::{end_timer, start_timer};
-use pasta_curves::arithmetic::FieldExt;
+use crate::FieldExt;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone)]
-pub struct CommittedMerkleTree<F: FieldExt<Repr = [u8; 32]>> {
+pub struct CommittedMerkleTree<F: FieldExt> {
     pub layers: Vec<Vec<F>>,
 }
 
-#[derive(Clone, Debug)]
-pub struct MerkleProof<F: FieldExt<Repr = [u8; 32]>> {
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct MerkleProof<F: FieldExt> {
     pub root: F,
     pub leaf: F,
     pub siblings: Vec<F>,
     pub leaf_index: usize,
-    pub tree_depth: usize,
 }
 
-impl<F: FieldExt<Repr = [u8; 32]>> MerkleProof<F> {
+impl<F: FieldExt> MerkleProof<F> {
     pub fn verify(&self) -> bool {
         let mut current_hash = self.leaf;
         let mut index = self.leaf_index;
@@ -34,11 +33,8 @@ impl<F: FieldExt<Repr = [u8; 32]>> MerkleProof<F> {
     }
 }
 
-impl<F: FieldExt<Repr = [u8; 32]>> CommittedMerkleTree<F> {
+impl<F: FieldExt> CommittedMerkleTree<F> {
     pub fn from_leaves(leaves: Vec<F>) -> Self {
-        let commit_timer =
-            start_timer!(|| format!("Commit to Merkle tree with leaves {}", leaves.len()));
-
         let n = leaves.len();
         assert!(n.is_power_of_two());
 
@@ -48,7 +44,7 @@ impl<F: FieldExt<Repr = [u8; 32]>> CommittedMerkleTree<F> {
         // Add a dummy leaf if the number of leaves is odd.
         let mut leaves = leaves.to_vec();
         if n % 2 == 1 {
-            leaves.push(F::zero());
+            leaves.push(F::ZERO);
         }
 
         // The first layer is the leaves.
@@ -65,8 +61,6 @@ impl<F: FieldExt<Repr = [u8; 32]>> CommittedMerkleTree<F> {
             layers.push(layer.clone());
             leaves = layer;
         }
-
-        end_timer!(commit_timer);
 
         assert_eq!(layers.len(), num_layers);
         assert_eq!(layers[num_layers - 1].len(), 1);
@@ -126,7 +120,6 @@ impl<F: FieldExt<Repr = [u8; 32]>> CommittedMerkleTree<F> {
             leaf: self.layers[0][leaf_index],
             siblings,
             leaf_index,
-            tree_depth: self.layers.len() - 1,
         }
     }
 
@@ -140,6 +133,7 @@ impl<F: FieldExt<Repr = [u8; 32]>> CommittedMerkleTree<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ff::Field;
     use pasta_curves::Fp;
 
     type F = Fp;
@@ -161,7 +155,7 @@ mod tests {
 
         // Should assert invalid opening proof
         let mut proof = tree.open(Fp::from(5));
-        proof.siblings[0] = proof.siblings[0] + F::one();
+        proof.siblings[0] = proof.siblings[0] + F::ONE;
         assert!(!proof.verify(), "Verifycation should fail");
     }
 }

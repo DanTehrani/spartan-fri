@@ -1,4 +1,5 @@
-use pasta_curves::arithmetic::FieldExt;
+use crate::FieldExt;
+use ff::Field;
 
 use crate::spartan::sumcheck::{SumCheckPhase1, SumCheckPhase2};
 use crate::spartan::{SpartanPP, SpartanProof};
@@ -8,7 +9,7 @@ pub struct SpartanVerifier<F: FieldExt, PCS: PolyCommitment<F>> {
     pp: SpartanPP<F, PCS>,
 }
 
-impl<F: FieldExt<Repr = [u8; 32]>, PCS: PolyCommitment<F>> SpartanVerifier<F, PCS> {
+impl<F: FieldExt, PCS: PolyCommitment<F>> SpartanVerifier<F, PCS> {
     pub fn new(pp: SpartanPP<F, PCS>) -> Self {
         Self { pp }
     }

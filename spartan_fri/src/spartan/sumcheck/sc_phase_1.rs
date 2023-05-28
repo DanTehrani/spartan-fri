@@ -5,7 +5,8 @@ use crate::spartan::polynomial::ml_poly::MlPoly;
 use crate::spartan::sumcheck::unipoly::UniPoly;
 use crate::spartan::utils::boolean_hypercube;
 
-use pasta_curves::arithmetic::FieldExt;
+use crate::FieldExt;
+use ff::Field;
 
 pub struct SCPhase1Proof<F: FieldExt> {
     pub round_polys: Vec<UniPoly<F>>,
@@ -48,11 +49,11 @@ impl<F: FieldExt> SumCheckPhase1<F> {
     pub fn round(&self, j: usize) -> UniPoly<F> {
         // evaluate at points 0, 1, 2, 3
 
-        let zero = F::zero();
-        let one = F::one();
+        let zero = F::ZERO;
+        let one = F::ONE;
 
         let m = self.Az_poly.num_vars;
-        let mut evals = [F::zero(); 4];
+        let mut evals = [F::ZERO; 4];
 
         for vars in &boolean_hypercube(m - j - 1) {
             let mut eval_at = vec![];
@@ -96,8 +97,8 @@ impl<F: FieldExt> SumCheckPhase1<F> {
     pub fn verify_round_polys(proof: &SCPhase1Proof<F>, challenge: &[F]) -> (F, F) {
         let m = challenge.len();
 
-        let zero = F::zero();
-        let one = F::one();
+        let zero = F::ZERO;
+        let one = F::ONE;
 
         let round_polys = &proof.round_polys;
         let sum_claim = round_polys[0].eval(zero) + round_polys[0].eval(one);
@@ -129,15 +130,15 @@ mod tests {
         let coeffs = [F::from(1u64), F::from(2u64), F::from(3u64), F::from(4u64)];
         let eval_at = Fp::from(33);
 
-        let mut expected_eval = F::zero();
+        let mut expected_eval = F::ZERO;
         for i in 0..coeffs.len() {
             expected_eval += coeffs[i] * eval_at.pow(&[3 - i as u64, 0, 0, 0]);
         }
 
-        let mut evals = [F::zero(); 4];
+        let mut evals = [F::ZERO; 4];
         for i in 0..4 {
             let eval_at = F::from(i as u64);
-            let mut eval_i = F::zero();
+            let mut eval_i = F::ZERO;
             for j in 0..coeffs.len() {
                 eval_i += coeffs[j] * eval_at.pow(&[3 - j as u64, 0, 0, 0]);
             }

@@ -1,4 +1,5 @@
-use pasta_curves::arithmetic::FieldExt;
+use crate::FieldExt;
+use ff::Field;
 
 #[derive(Clone, Debug)]
 pub struct MlPoly<F> {
@@ -28,7 +29,7 @@ impl<F: FieldExt> MlPoly<F> {
         let m = vals.len();
         assert_eq!(2usize.pow(m as u32), n);
 
-        let mut result = F::zero();
+        let mut result = F::ZERO;
         for i in 0..n {
             let mut term = coeffs[i];
             for j in 0..m {
@@ -68,7 +69,7 @@ impl<F: FieldExt> MlPoly<F> {
         let evals = domain
             .iter()
             .map(|x| {
-                let mut result = F::zero();
+                let mut result = F::ZERO;
                 for i in 0..n {
                     let mut term = coeffs[i];
                     for j in 0..num_vars {
@@ -110,7 +111,7 @@ impl<F: FieldExt> MlPoly<F> {
         let m = vals.len();
         assert_eq!(2usize.pow(m as u32), n);
 
-        let mut result = F::zero();
+        let mut result = F::ZERO;
         let coeffs = self.coeffs.as_ref().unwrap();
         for i in 0..n {
             let mut term = coeffs[i];
@@ -126,7 +127,7 @@ impl<F: FieldExt> MlPoly<F> {
     }
 
     pub fn eval_as_uni_with_coeffs(&self, val: &F) -> F {
-        let mut result = F::zero();
+        let mut result = F::ZERO;
 
         let coeffs = self.coeffs.as_ref().unwrap();
         let n = coeffs.len();
@@ -142,7 +143,7 @@ impl<F: FieldExt> MlPoly<F> {
 
         let coeffs = self.to_coeffs();
 
-        let mut result = F::zero();
+        let mut result = F::ZERO;
         for i in 0..n {
             result += coeffs[i] * val.pow(&[i as u64, 0, 0, 0]);
         }
@@ -161,9 +162,9 @@ impl<F: FieldExt> MlPoly<F> {
                     vars.insert(j, val.pow(&[i as u64, 0, 0, 0]));
                     val_set = true;
                 } else if (i >> j & 1) == 1 {
-                    vars.insert(j, F::one());
+                    vars.insert(j, F::ONE);
                 } else {
-                    vars.insert(j, F::zero());
+                    vars.insert(j, F::ZERO;);
                 }
             }
 
@@ -180,7 +181,7 @@ impl<F: FieldExt> MlPoly<F> {
             term_evals.push(eval_i);
         }
 
-        let mut eval = F::zero();
+        let mut eval = F::ZERO;;
         for term_eval in term_evals {
             eval += term_eval;
         }
@@ -198,11 +199,11 @@ impl<F: FieldExt> MlPoly<F> {
 
         let m = t.len();
 
-        let mut result = F::zero();
-        let one = F::one();
+        let mut result = F::ZERO;
+        let one = F::ONE;
 
         for i in 0..n {
-            let mut result_i = F::one();
+            let mut result_i = F::ONE;
             for j in 0..m {
                 let i_b = F::from((i >> j & 1) as u64);
                 result_i *= t[j] * i_b + (one - t[j]) * (one - i_b);
@@ -215,7 +216,7 @@ impl<F: FieldExt> MlPoly<F> {
 
         /*
         // Borrowed from https://github.com/microsoft/Spartan/blob/1e431e2bbfe74b8a53488c43adf32de1dd974777/src/dense_mlpoly.rs#L67
-        let mut evals = vec![F::one(); n];
+        let mut evals = vec![F::ONE; n];
 
         let mut size = 1;
         for j in 0..m {
@@ -230,7 +231,7 @@ impl<F: FieldExt> MlPoly<F> {
         }
 
         // TODO: Make this faster!
-        let mut result = F::zero();
+        let mut result = F::ZERO;;
         for i in 0..n {
             result += self.evals[i];
         }

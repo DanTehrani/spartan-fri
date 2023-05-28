@@ -1,11 +1,11 @@
 use crate::transcript::Transcript;
-use pasta_curves::arithmetic::FieldExt;
+use crate::FieldExt;
 use sha3::Digest;
 use sha3::Keccak256;
 
 pub fn hash_two<F>(values: &[F; 2]) -> F
 where
-    F: FieldExt<Repr = [u8; 32]>,
+    F: FieldExt,
 {
     /*
     let mut bytes = vec![];
@@ -23,7 +23,7 @@ where
     // Pad to 64 bytes
     let bytes_wide = vec![result.to_vec(), vec![0; 32]].concat();
 
-    let val = F::from_bytes_wide(&bytes_wide.try_into().unwrap());
+    let val = F::from_uniform_bytes(&bytes_wide.try_into().unwrap());
 
     /*
     let mut bytes_8 = vec![];
@@ -61,7 +61,7 @@ fn sample_index(random_bytes: [u8; 64], size: usize) -> usize {
     (acc % (size as u64)) as usize
 }
 
-pub fn sample_indices<F: FieldExt<Repr = [u8; 32]>>(
+pub fn sample_indices<F: FieldExt>(
     num_indices: usize,
     max_index: usize,
     reduced_max_index: usize,

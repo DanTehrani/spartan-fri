@@ -1,5 +1,6 @@
 // TBD
-use pasta_curves::arithmetic::FieldExt;
+use crate::FieldExt;
+use ff::Field;
 
 pub struct UniPoly<F: FieldExt> {
     pub coeffs: Vec<F>,
