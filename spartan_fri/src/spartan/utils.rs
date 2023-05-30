@@ -1,5 +1,4 @@
 use crate::FieldExt;
-use ff::Field;
 
 pub fn boolean_hypercube<F: FieldExt>(m: usize) -> Vec<Vec<F>> {
     let n = 2usize.pow(m as u32);

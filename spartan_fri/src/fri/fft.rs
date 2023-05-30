@@ -1,6 +1,5 @@
 use crate::FieldExt;
 use ff::Field;
-use ff::PrimeField;
 use std::vec;
 
 pub fn fft<F>(coeffs: &[F], domain: &[F]) -> Vec<F>
@@ -76,6 +75,7 @@ pub fn ifft<F: FieldExt + Field>(domain: &[F], evals: &[F]) -> Vec<F> {
 
 #[cfg(test)]
 mod tests {
+    use ff::PrimeField;
     use pasta_curves::Fp;
 
     use super::*;

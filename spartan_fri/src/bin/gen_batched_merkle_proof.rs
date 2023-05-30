@@ -2,17 +2,10 @@ use std::env;
 use std::fs::File;
 use std::io::Write;
 
-use bincode::config::FixintEncoding;
-use bincode::{serialize, Options, Serializer};
-use ethers::types::U256;
 use ff::PrimeField;
 use rand;
 use rand::Rng;
-use serde::Serialize;
 use spartan_fri::fri::tree::{BatchedMerkleProof, CommittedMerkleTree};
-use spartan_fri::fri::{FRIConfig, FRIMLPolyCommitProver};
-use spartan_fri::spartan::polynomial::ml_poly::MlPoly;
-use spartan_fri::transcript::Transcript;
 
 use pasta_curves::group::ff::Field;
 
@@ -27,8 +20,6 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     let depth = usize::from_str_radix(&args[1], 10).unwrap();
     let batch_size = usize::from_str_radix(&args[2], 10).unwrap();
-    println!("depth: {}", depth);
-    println!("batch_size: {}", batch_size);
     let num_leaves = 2usize.pow(depth as u32);
 
     let mut rng = rand::thread_rng();
@@ -51,7 +42,7 @@ fn main() {
 
     let batched_proof: BatchedMerkleProof<pasta_curves::Fp> =
         BatchedMerkleProof::from_proofs(proofs);
-    println!("Verify proof");
+
     batched_proof.verify(opened_leaves.clone(), tree.root());
 
     let hashes_ser = batched_proof
@@ -88,11 +79,6 @@ fn main() {
         .map(|x| x.to_repr())
         .flatten()
         .collect::<Vec<u8>>();
-
-    let root = tree.root();
-    let leaf = opened_leaves[0].to_repr();
-    println!("root {:?}", U256::from_little_endian(&root));
-    println!("leaf {:?}", U256::from_little_endian(&leaf));
 
     save_file("hashes.bin", &hashes_ser);
     save_file("indices.bin", &indices_ser);

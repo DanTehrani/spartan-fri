@@ -2,7 +2,6 @@ use std::marker::PhantomData;
 
 use super::utils::hash_two;
 use crate::FieldExt;
-use ethers::types::U256;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone)]
@@ -224,7 +223,6 @@ impl<F: FieldExt> BatchedMerkleProof<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ff::Field;
     use pasta_curves::Fp;
 
     type F = Fp;
@@ -238,7 +236,6 @@ mod tests {
             .collect::<Vec<F>>();
 
         let tree = CommittedMerkleTree::<F>::from_leaves(leaves.clone());
-        let root = tree.root();
         let open_leaf = leaves[3];
 
         for i in 0..leaves.len() {

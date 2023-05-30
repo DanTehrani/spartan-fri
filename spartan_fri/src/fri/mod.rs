@@ -6,8 +6,6 @@ mod unipoly;
 mod utils;
 
 use crate::FieldExt;
-use bincode::serialize;
-use ff::Field;
 use serde::{Deserialize, Serialize};
 use tree::MerkleProof;
 
@@ -66,32 +64,6 @@ where
     pub f_i_evals_beta_squared: Vec<F>,
     pub y: F,
     pub x: Vec<F>,
-}
-
-impl<F> MLPolyEvalProof<F>
-where
-    F: FieldExt,
-{
-    pub fn print_byte_size(&self) {
-        let queries_first_round_ser = serialize(&self.queries_first_round).unwrap();
-        let queries_ser = serialize(&self.queries).unwrap();
-        let reduced_codeword_ser = serialize(&self.reduced_codeword).unwrap();
-        let f_i_evals_beta_ser = serialize(&self.f_i_evals_beta).unwrap();
-        let f_i_evals_beta_squared_ser = serialize(&self.f_i_evals_beta_squared).unwrap();
-
-        println!("queries_first_round: {}", queries_first_round_ser.len());
-        println!("queries: {}", queries_ser.len());
-        println!("reduced_codeword: {}", reduced_codeword_ser.len());
-        println!("f_i_evals_beta: {}", f_i_evals_beta_ser.len());
-        println!(
-            "f_i_evals_beta_squared: {}",
-            f_i_evals_beta_squared_ser.len()
-        );
-
-        let proof_ser = serialize(&self).unwrap();
-
-        println!("proof: {}", proof_ser.len());
-    }
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -209,7 +181,6 @@ mod tests {
         let fri_prover = FRIMLPolyCommitProver::new(fri_config.clone());
         let prove_timer = start_timer!(|| "prove");
         let proof = fri_prover.prove_eval(&ml_poly, &eval_at, &mut prover_transcript);
-        proof.print_byte_size();
         end_timer!(prove_timer);
 
         let mut verifier_transcript = Transcript::<F>::new(b"test");

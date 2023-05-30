@@ -1,5 +1,4 @@
 use crate::FieldExt;
-use ff::Field;
 
 use crate::spartan::sumcheck::{SumCheckPhase1, SumCheckPhase2};
 use crate::spartan::{SpartanPP, SpartanProof};

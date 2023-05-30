@@ -1,5 +1,4 @@
 use crate::FieldExt;
-use ff::Field;
 use merlin::Transcript as MerlinTranscript;
 use std::marker::PhantomData;
 
@@ -27,7 +26,7 @@ impl<F: FieldExt> Transcript<F> {
 
     pub fn challenge_vec(&mut self, n: usize) -> Vec<F> {
         (0..n)
-            .map(|i| {
+            .map(|_| {
                 let mut bytes = [0u8; 64];
                 self.transcript_inner.challenge_bytes(b"", &mut bytes);
                 F::from_uniform_bytes(&bytes)

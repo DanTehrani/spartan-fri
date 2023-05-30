@@ -5,7 +5,6 @@ use crate::fri::utils::{reduce_indices, sample_indices};
 use crate::fri::{FRIConfig, MLPolyEvalProof, QueryFirstRound};
 use crate::transcript::Transcript;
 use crate::FieldExt;
-use ff::Field;
 
 pub struct FRIMLPolyCommitVerifier<F>
 where
@@ -66,7 +65,6 @@ where
         beta_challenge: F,
     ) -> (F, F) {
         let bounded_poly_openings = &query_first_round.bounded_poly_openings;
-        let f_1_beta_squared_opening = &query_first_round.g_1_opening_at_t;
 
         let mut poly_degree = self.config.L[0].len() / self.config.expansion_factor - 1;
         let k = (poly_degree + 1).next_power_of_two();

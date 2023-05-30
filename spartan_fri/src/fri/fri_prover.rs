@@ -1,4 +1,4 @@
-use crate::fri::tree::{CommittedMerkleTree, MerkleProof};
+use crate::fri::tree::CommittedMerkleTree;
 use crate::fri::unipoly::UniPoly;
 use crate::fri::utils::{reduce_indices, sample_indices};
 use crate::fri::{

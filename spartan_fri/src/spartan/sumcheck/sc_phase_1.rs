@@ -6,7 +6,6 @@ use crate::spartan::sumcheck::unipoly::UniPoly;
 use crate::spartan::utils::boolean_hypercube;
 
 use crate::FieldExt;
-use ff::Field;
 
 pub struct SCPhase1Proof<F: FieldExt> {
     pub round_polys: Vec<UniPoly<F>>,
@@ -124,6 +123,7 @@ mod tests {
     use super::*;
     use pasta_curves::Fp;
     type F = Fp;
+    use ff::Field;
 
     #[test]
     fn test_unipoly_3() {

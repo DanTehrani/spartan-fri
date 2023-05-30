@@ -56,14 +56,3 @@ pub fn reduce_indices(indices: &mut Vec<usize>, max_index: usize) {
         }
     });
 }
-
-pub fn get_point_indices(indices: &[usize]) -> (Vec<usize>, Vec<usize>, Vec<usize>) {
-    let a_indices = indices.to_vec();
-    let b_indices = indices
-        .iter()
-        .map(|index| (indices.len() / 2) + index)
-        .collect::<Vec<usize>>();
-    let c_indices = indices.to_vec();
-
-    (a_indices, b_indices, c_indices)
-}

@@ -1,5 +1,4 @@
 use crate::FieldExt;
-use ff::Field;
 
 #[derive(Clone)]
 pub struct Matrix<F>(Vec<(usize, usize, F)>)

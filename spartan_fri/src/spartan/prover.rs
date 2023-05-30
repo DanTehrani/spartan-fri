@@ -6,7 +6,6 @@ use crate::spartan::sumcheck::{SumCheckPhase1, SumCheckPhase2};
 use crate::spartan::{SpartanPP, SpartanProof};
 use crate::FieldExt;
 use crate::PolyCommitment;
-use ff::Field;
 
 pub struct SpartanProver<F: FieldExt, PCS: PolyCommitment<F>> {
     pp: SpartanPP<F, PCS>,

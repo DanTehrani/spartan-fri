@@ -10,8 +10,7 @@ use spartan_fri::transcript::Transcript;
 type F = pasta_curves::Fp;
 
 fn gen_config(num_vars: usize) -> FRIConfig<F> {
-    let m = 13;
-    let n = 2usize.pow(m);
+    let n = 2usize.pow(num_vars as u32);
 
     let poly_degree = n;
     let num_queries = 30;
