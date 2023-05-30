@@ -288,8 +288,8 @@ where
             if i != 0 {
                 // For i = 0, the verifier derives the opening from the oracle
                 // of f(X), so we don't need to commit to it.
-                let tree = CommittedMerkleTree::from_leaves(codeword.clone());
-                transcript.append_fe(&tree.root());
+                let tree = CommittedMerkleTree::<F>::from_leaves(codeword.clone());
+                transcript.append_bytes(&tree.root());
                 trees.push(tree);
             }
 

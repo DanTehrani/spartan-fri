@@ -1,55 +1,15 @@
 use crate::transcript::Transcript;
 use crate::FieldExt;
-use sha3::Digest;
-use sha3::Keccak256;
+use ethers::abi::{encode_packed, Token};
+use ethers::core::utils::keccak256;
+use ethers::types::U256;
 
-pub fn hash_two<F>(values: &[F; 2]) -> F
-where
-    F: FieldExt,
-{
-    /*
-    let mut bytes = vec![];
-    bytes.extend_from_slice(&values[0].to_repr());
-    bytes.resize(32, 0);
-    bytes.extend_from_slice(&values[1].to_repr());
-    bytes.resize(32, 0);
-     */
-
-    let mut hasher = Keccak256::new();
-    hasher.update(values[0].to_repr());
-    hasher.update(values[1].to_repr());
-    let result = hasher.finalize();
-
-    // Pad to 64 bytes
-    let bytes_wide = vec![result.to_vec(), vec![0; 32]].concat();
-
-    let val = F::from_uniform_bytes(&bytes_wide.try_into().unwrap());
-
-    /*
-    let mut bytes_8 = vec![];
-    for i in 0..(bytes.len() / 8) {
-        let mut acc: u64 = 0;
-        for j in 0..8 {
-            acc += (bytes[8 * i + j] as u64) << j;
-        }
-        bytes_8.push(acc);
-    }
-
-    bytes_8.resize(25, 33);
-
-    keccak::f1600(&mut bytes_8.as_slice().try_into().unwrap());
-
-    let mut bytes = bytes_8[0..16]
-        .iter()
-        .flat_map(|x| x.to_le_bytes().to_vec())
-        .collect::<Vec<u8>>();
-    bytes.reverse();
-    println!("bytes: {:?}", bytes);
-
-    let val = F::from_bytes_wide(&bytes[0..64].try_into().unwrap());
-     */
-
-    val
+pub fn hash_two(values: &[[u8; 32]; 2]) -> [u8; 32] {
+    let a = U256::from_little_endian(&values[0]);
+    let b = U256::from_little_endian(&values[1]);
+    let mut hashed = keccak256(&encode_packed(&[Token::Uint(a), Token::Uint(b)]).unwrap());
+    hashed.reverse();
+    hashed
 }
 
 fn sample_index(random_bytes: [u8; 64], size: usize) -> usize {

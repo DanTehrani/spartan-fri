@@ -43,7 +43,7 @@ where
     }
 
     pub fn codeword(&self) -> Vec<F> {
-        self.committed_merkle_tree.layers[0].clone()
+        self.committed_merkle_tree.leaves.clone()
     }
 }
 
@@ -110,7 +110,7 @@ where
     ) -> CommittedUniPoly<F> {
         let evals = self.eval_fft(domain);
         let tree = CommittedMerkleTree::from_leaves(evals);
-        transcript.append_fe(&tree.root());
+        transcript.append_bytes(&tree.root());
 
         CommittedUniPoly {
             coeffs: self.coeffs.clone(),

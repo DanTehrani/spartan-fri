@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "compile": "hardhat compile",
-     "bench_gas": "ts-node --files ./scripts/bench_gas.ts"
+    "bench_gas": "ts-node --files ./scripts/bench_gas.ts"
   },
   "keywords": [],
   "author": "",
@@ -27,6 +27,7 @@
     "ethers": "^5.4.7",
     "hardhat": "^2.14.0",
     "hardhat-gas-reporter": "^1.0.8",
+    "prettier": "^2.8.8",
     "solidity-coverage": "^0.8.0",
     "ts-node": ">=8.0.0",
     "typechain": "^8.1.0",

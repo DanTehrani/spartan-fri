@@ -106,8 +106,8 @@ where
 
             // e0 and e1 are the supposed evaluations of f_i(s_0) and f_i(s_1)
             // respectively.
-            let e0 = opening_at_s0.leaf;
-            let e1 = opening_at_s1.leaf;
+            let e0 = opening_at_s0.leaf_fe();
+            let e1 = opening_at_s1.leaf_fe();
 
             // ##########################################
             // Derive the evaluation of the quotient polynomial
@@ -158,8 +158,8 @@ where
                 let (q_beta_squared_0, q_beta_squared_1) = Self::get_quotient_evaluations(
                     eval_beta_squared,
                     (
-                        bounded_poly_openings[i + 1].opening_at_s0.leaf,
-                        bounded_poly_openings[i + 1].opening_at_s1.leaf,
+                        bounded_poly_openings[i + 1].opening_at_s0.leaf_fe(),
+                        bounded_poly_openings[i + 1].opening_at_s1.leaf_fe(),
                     ),
                     beta_challenge.square(),
                     (s_0, s_1),
@@ -190,7 +190,7 @@ where
         // Append all commitments to f_0,...f_{n-1} polynomials to the transcript
         for openings in &proof.queries_first_round[0].bounded_poly_openings {
             // Append the commitment to the polynomial to the transcript
-            transcript.append_fe(&openings.opening_at_s0.root);
+            transcript.append_bytes(&openings.opening_at_s0.root);
         }
 
         let beta_challenge = transcript.challenge_fe();
@@ -209,11 +209,11 @@ where
         for i in 0..(num_rounds - 2) {
             // Append the commitment to the batched quotient polynomial to the transcript,
             // and get the challenge value
-            transcript.append_fe(&proof.queries[i].queries[0].opening_at_s0.root);
+            transcript.append_bytes(&proof.queries[i].queries[0].opening_at_s0.root);
             challenges.push(transcript.challenge_fe());
 
             if i == num_rounds - 3 {
-                transcript.append_fe(&proof.queries[i].queries[0].opening_at_t.root);
+                transcript.append_bytes(&proof.queries[i].queries[0].opening_at_t.root);
                 challenges.push(transcript.challenge_fe());
             }
         }
@@ -246,7 +246,7 @@ where
             );
 
             let g_i_opening_at_t = &query.g_1_opening_at_t;
-            let beta = g_i_opening_at_t.leaf;
+            let beta = g_i_opening_at_t.leaf_fe();
 
             assert_eq!(
                 beta,
@@ -282,9 +282,9 @@ where
                 assert_eq!(y, s_0 * s_0);
                 assert_eq!(y, s_1 * s_1);
 
-                let e0 = opening_at_s0.leaf;
-                let e1 = opening_at_s1.leaf;
-                let e3 = opening_at_t.leaf;
+                let e0 = opening_at_s0.leaf_fe();
+                let e1 = opening_at_s1.leaf_fe();
+                let e3 = opening_at_t.leaf_fe();
 
                 // Interpolate the points (s_0, e0) (s_1, e1)
                 let coeff = (e0 - e1) * (s_0 - s_1).invert().unwrap();
