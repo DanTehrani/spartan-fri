@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "compile": "hardhat compile",
-    "bench_gas": "ts-node --files ./scripts/bench_gas.ts"
+    "bench_gas": "pnpm compile && ts-node --files ./scripts/bench_gas.ts",
+    "bench_merkle_gas": "pnpm compile && ts-node --files ./scripts/bench_merkle_verifier.ts"
   },
   "keywords": [],
   "author": "",
