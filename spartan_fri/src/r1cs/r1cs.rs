@@ -1,4 +1,4 @@
-use crate::FieldExt;
+use crate::{spartan::polynomial::ml_poly::MlPoly, FieldExt};
 
 #[derive(Clone)]
 pub struct Matrix<F>(Vec<(usize, usize, F)>)
@@ -18,6 +18,20 @@ where
             result[row] += val * vec[col];
         }
         result
+    }
+
+    pub fn to_ml_extension(&self, s: usize) -> MlPoly<F> {
+        let mut evals = vec![F::ZERO; 2usize.pow(2 * s as u32)];
+        for i in 0..self.0.len() {
+            let row = self.0[i].0;
+            let col = self.0[i].1;
+            let val = self.0[i].2;
+            evals[row * 2usize.pow(s as u32) + col] = val;
+        }
+
+        let ml_poly = MlPoly::new(evals);
+
+        ml_poly
     }
 }
 

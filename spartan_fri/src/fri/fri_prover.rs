@@ -7,7 +7,7 @@ use crate::fri::{
 use crate::spartan::polynomial::ml_poly::MlPoly;
 use crate::transcript::Transcript;
 use crate::FieldExt;
-use crate::PolyCommitment;
+use crate::MultilinearPCS;
 use ark_std::{end_timer, start_timer};
 
 #[derive(Clone)]
@@ -18,21 +18,34 @@ where
     pub config: FRIConfig<F>,
 }
 
-impl<F> PolyCommitment<F> for FRIMLPolyCommitProver<F>
+impl<F> MultilinearPCS<F> for FRIMLPolyCommitProver<F>
 where
     F: FieldExt,
 {
-    type Commitment = Vec<F>;
-    type Opening = Vec<F>;
-    fn new() -> Self {
-        todo!();
+    type Commitment = [u8; 32];
+    type Opening = MLPolyEvalProof<F>;
+    type Config = FRIConfig<F>;
+
+    fn new(config: Self::Config) -> Self {
+        Self { config }
     }
 
-    fn commit(&self, evals: &[F]) -> Self::Commitment {
-        todo!();
+    fn commit(&self, poly: &MlPoly<F>) -> Self::Commitment {
+        // Compute the evaluations of the polynomial at the domain
+        let poly = UniPoly::new(poly.to_coeffs());
+        let evals = poly.eval_fft(&self.config.L[0]);
+        // TODO: Save this tree for later use
+        let tree = CommittedMerkleTree::from_leaves(evals);
+
+        tree.root()
     }
 
-    fn open(&self, point: &[F]) -> Self::Opening {
+    fn open(&self, poly: &MlPoly<F>, point: &[F], transcript: &mut Transcript<F>) -> Self::Opening {
+        let opening = self.prove_eval(poly, point, transcript);
+        opening
+    }
+
+    fn verify(&self, commitment: &Self::Commitment, point: &[F], eval: &F) -> bool {
         todo!();
     }
 }
@@ -41,12 +54,8 @@ impl<F> FRIMLPolyCommitProver<F>
 where
     F: FieldExt,
 {
-    pub fn new(config: FRIConfig<F>) -> Self {
-        Self { config }
-    }
-
     fn fold(&self, codeword: &[F], domain: &[F], alpha: F) -> Vec<F> {
-        assert!(codeword.len() == domain.len());
+        debug_assert!(codeword.len() == domain.len());
         let two_inv = F::from(2).invert().unwrap();
         let one = F::from(1);
 
@@ -78,7 +87,11 @@ where
         x: &[F],
         transcript: &mut Transcript<F>,
     ) -> MLPolyEvalProof<F> {
-        assert!(ml_poly.coeffs.is_some());
+        // TODO: Avoid cloning here
+        let mut ml_poly = ml_poly.clone();
+        ml_poly.compute_coeffs();
+
+        debug_assert!(ml_poly.coeffs.is_some());
 
         // Set the constants
         let m = x.len();
@@ -100,7 +113,7 @@ where
         let codeword = f_0_comm.committed_merkle_tree.leaves();
         let target_codeword_size = self.config.L[0].len();
 
-        assert_eq!(codeword.len(), target_codeword_size);
+        debug_assert_eq!(codeword.len(), target_codeword_size);
 
         // ##########################################
         // Compute and commitments to f_1,...,f_m
@@ -120,7 +133,7 @@ where
 
             // Sanity check
             let f_i_prev = &f_comms[i - 1];
-            assert_eq!(f_i_prev.eval(x[i - 1]), f_i.eval(x[i - 1].square()));
+            debug_assert_eq!(f_i_prev.eval(x[i - 1]), f_i.eval(x[i - 1].square()));
 
             // Commit to f_i(X)
             let f_i_comm = f_i.merkle_commit(&self.config.L[0], transcript);
@@ -129,7 +142,7 @@ where
 
         // Get the challenge point to evaluate f_0,f_1,...,f_{m-1}
         let beta = transcript.challenge_fe();
-        assert_eq!((-beta).square(), beta.square());
+        debug_assert_eq!((-beta).square(), beta.square());
 
         // Compute quotient codewords for all evaluation challenges
         let mut quotient_codewords = Vec::with_capacity(f_comms.len() * 3);
@@ -194,7 +207,7 @@ where
 
             let pad_degree = k - poly_degree - 1;
 
-            assert_eq!(quotient_codewords[i].len(), target_codeword_size);
+            debug_assert_eq!(quotient_codewords[i].len(), target_codeword_size);
 
             let weighed_evals = quotient_codewords[i]
                 .iter()
@@ -311,9 +324,9 @@ where
         f_trees: &[CommittedMerkleTree<F>],
         tree_next: &CommittedMerkleTree<F>,
     ) -> Vec<QueryFirstRound<F>> {
-        assert_eq!(codeword.len(), self.config.L[0].len());
-        assert_eq!(codeword_next.len(), self.config.L[1].len());
-        assert_eq!(self.config.num_queries, indices.len());
+        debug_assert_eq!(codeword.len(), self.config.L[0].len());
+        debug_assert_eq!(codeword_next.len(), self.config.L[1].len());
+        debug_assert_eq!(self.config.num_queries, indices.len());
 
         let mut queries = Vec::with_capacity(self.config.num_queries);
 
@@ -332,8 +345,8 @@ where
             let s_0 = self.config.L[0][*index];
             let s_1 = self.config.L[0][*index + next_layer_size];
             let y = self.config.L[1][*index];
-            assert_eq!(y, s_0.pow([folding_factor, 0, 0, 0]));
-            assert_eq!(y, s_1.pow([folding_factor, 0, 0, 0]));
+            debug_assert_eq!(y, s_0.pow([folding_factor, 0, 0, 0]));
+            debug_assert_eq!(y, s_1.pow([folding_factor, 0, 0, 0]));
 
             let mut openings_at_s0 = Vec::with_capacity(f_trees.len());
             let mut openings_at_s1 = Vec::with_capacity(f_trees.len());
@@ -400,8 +413,8 @@ where
                 let s_1 = self.config.L[i + 1][index + (codeword.len() / 2)];
                 let y = self.config.L[i + 2][index];
 
-                assert_eq!(y, s_0.pow([folding_factor, 0, 0, 0]));
-                assert_eq!(y, s_1.pow([folding_factor, 0, 0, 0]));
+                debug_assert_eq!(y, s_0.pow([folding_factor, 0, 0, 0]));
+                debug_assert_eq!(y, s_1.pow([folding_factor, 0, 0, 0]));
 
                 let opening_at_s0 = tree.open(e0);
                 let opening_at_s1 = tree.open(e1);

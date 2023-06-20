@@ -24,9 +24,10 @@ impl<F: FieldExt> SumCheckPhase1<F> {
         Az_poly: MlPoly<F>,
         Bz_poly: MlPoly<F>,
         Cz_poly: MlPoly<F>,
+        tau: Vec<F>,
         challenge: Vec<F>,
     ) -> Self {
-        let bound_eq_poly = EqPoly::new(challenge.clone());
+        let bound_eq_poly = EqPoly::new(tau);
         Self {
             Az_poly,
             Bz_poly,
@@ -37,7 +38,7 @@ impl<F: FieldExt> SumCheckPhase1<F> {
     }
 
     fn eval_poly(&self, vars: &[F]) -> F {
-        assert_eq!(vars.len(), self.Az_poly.num_vars);
+        debug_assert_eq!(vars.len(), self.Az_poly.num_vars);
 
         let eval = (self.Az_poly.eval(vars) + self.Bz_poly.eval(vars) - self.Cz_poly.eval(vars))
             * self.bound_eq_poly.eval(vars);

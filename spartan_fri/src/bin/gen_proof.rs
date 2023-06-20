@@ -6,6 +6,7 @@ use bincode::serialize;
 use spartan_fri::fri::{FRIConfig, FRIMLPolyCommitProver};
 use spartan_fri::spartan::polynomial::ml_poly::MlPoly;
 use spartan_fri::transcript::Transcript;
+use spartan_fri::MultilinearPCS;
 
 type F = pasta_curves::Fp;
 

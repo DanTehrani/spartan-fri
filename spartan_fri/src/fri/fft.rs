@@ -6,7 +6,7 @@ pub fn fft<F>(coeffs: &[F], domain: &[F]) -> Vec<F>
 where
     F: FieldExt,
 {
-    assert!(coeffs.len() == domain.len());
+    debug_assert!(coeffs.len() == domain.len());
     if coeffs.len() == 1 {
         return coeffs.to_vec();
     }
@@ -124,9 +124,9 @@ mod tests {
         }
 
         let evals = fft(&coeffs, &domain);
-        assert!(evals == expected_evals);
+        debug_assert!(evals == expected_evals);
 
         let recovered_coeffs = ifft(&domain, &evals);
-        assert!(recovered_coeffs == coeffs);
+        debug_assert!(recovered_coeffs == coeffs);
     }
 }

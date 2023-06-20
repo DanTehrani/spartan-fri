@@ -35,7 +35,7 @@ impl<F: FieldExt> SumCheckPhase2<F> {
     }
 
     fn eval_poly(&self, vars: &[F]) -> F {
-        assert_eq!(vars.len(), self.Az_poly.num_vars);
+        debug_assert_eq!(vars.len(), self.Az_poly.num_vars);
 
         let r_A = self.r[0];
         let r_B = self.r[1];

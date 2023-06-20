@@ -88,7 +88,7 @@ where
     }
 
     pub fn interpolate(domain: &[F], evals: &[F]) -> Self {
-        assert!(domain.len() == evals.len());
+        debug_assert!(domain.len() == evals.len());
         let coeffs = ifft(&domain, &evals);
         let mut degree = 0;
 

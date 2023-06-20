@@ -27,7 +27,7 @@ impl<F: FieldExt> MlPoly<F> {
     pub fn eval_coeffs(&self, coeffs: &[F], vals: &[F]) -> F {
         let n = coeffs.len();
         let m = vals.len();
-        assert_eq!(2usize.pow(m as u32), n);
+        debug_assert_eq!(2usize.pow(m as u32), n);
 
         let mut result = F::ZERO;
         for i in 0..n {
@@ -109,7 +109,7 @@ impl<F: FieldExt> MlPoly<F> {
     pub fn eval_with_coeffs(&self, vals: &[F]) -> F {
         let n = self.evals.len();
         let m = vals.len();
-        assert_eq!(2usize.pow(m as u32), n);
+        debug_assert_eq!(2usize.pow(m as u32), n);
 
         let mut result = F::ZERO;
         let coeffs = self.coeffs.as_ref().unwrap();
@@ -193,7 +193,7 @@ impl<F: FieldExt> MlPoly<F> {
     // `a` is in evaluation form.
     pub fn eval(&self, t: &[F]) -> F {
         let n = self.evals.len();
-        assert_eq!((n as f64).log2() as usize, t.len());
+        debug_assert_eq!((n as f64).log2() as usize, t.len());
         // Evaluate the multilinear extension of the polynomial `a`,
         // over the boolean hypercube
 

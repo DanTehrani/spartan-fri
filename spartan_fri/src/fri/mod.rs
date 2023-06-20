@@ -5,7 +5,7 @@ pub mod tree;
 mod unipoly;
 mod utils;
 
-use crate::FieldExt;
+use crate::{FieldExt, MultilinearPCS, MultilinearPCSOpening};
 use serde::{Deserialize, Serialize};
 use tree::MerkleProof;
 
@@ -66,6 +66,16 @@ where
     pub x: Vec<F>,
 }
 
+impl<F: FieldExt> MultilinearPCSOpening<F> for MLPolyEvalProof<F> {
+    fn x(&self) -> Vec<F> {
+        self.x.clone()
+    }
+
+    fn y(&self) -> F {
+        self.y
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct FRIConfig<F>
 where
@@ -88,7 +98,7 @@ where
         num_queries: usize,
         final_codeword_size: usize,
     ) -> Self {
-        assert!(folding_factor.is_power_of_two());
+        debug_assert!(folding_factor.is_power_of_two());
 
         let root_of_unity = F::ROOT_OF_UNITY;
         let mut domain_order = (poly_degree * expansion_factor).next_power_of_two();
@@ -147,6 +157,7 @@ mod tests {
     use super::*;
     use crate::spartan::polynomial::ml_poly::MlPoly;
     use crate::transcript::Transcript;
+    use crate::MultilinearPCS;
     type F = pasta_curves::Fp;
 
     #[test]

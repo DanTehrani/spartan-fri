@@ -217,7 +217,7 @@ where
         }
 
         let reduced_domain = &self.config.L[self.config.L.len() - 1];
-        assert_eq!(reduced_domain.len(), proof.reduced_codeword.len());
+        debug_assert_eq!(reduced_domain.len(), proof.reduced_codeword.len());
 
         // Check that the final codeword corresponds to a low-degree polynomial
         let interpolant = UniPoly::interpolate(&reduced_domain, &proof.reduced_codeword);

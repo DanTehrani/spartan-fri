@@ -1,6 +1,6 @@
 use crate::FieldExt;
 use merlin::Transcript as MerlinTranscript;
-use std::marker::PhantomData;
+use std::{marker::PhantomData, panic::UnwindSafe};
 
 #[derive(Clone)]
 pub struct Transcript<F: FieldExt> {
@@ -42,5 +42,15 @@ impl<F: FieldExt> Transcript<F> {
 
     pub fn challenge_bytes(&mut self, bytes: &mut [u8]) {
         self.transcript_inner.challenge_bytes(b"", bytes);
+    }
+}
+
+pub trait AppendToTranscript<F: FieldExt> {
+    fn append_to_transcript(&self, transcript: &mut Transcript<F>);
+}
+
+impl<F: FieldExt> AppendToTranscript<F> for [u8; 32] {
+    fn append_to_transcript(&self, transcript: &mut Transcript<F>) {
+        transcript.append_bytes(self);
     }
 }

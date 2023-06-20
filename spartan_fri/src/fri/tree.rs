@@ -45,7 +45,7 @@ impl<F: FieldExt> MerkleProof<F> {
 impl<F: FieldExt> CommittedMerkleTree<F> {
     pub fn from_leaves(leaves: Vec<F>) -> Self {
         let n = leaves.len();
-        assert!(n.is_power_of_two());
+        debug_assert!(n.is_power_of_two());
 
         let num_layers = (n as f64).log2() as usize + 1;
         let mut layers = Vec::with_capacity(num_layers);
@@ -72,8 +72,8 @@ impl<F: FieldExt> CommittedMerkleTree<F> {
             layers.push(layer);
         }
 
-        assert_eq!(layers.len(), num_layers);
-        assert_eq!(layers[num_layers - 1].len(), 1);
+        debug_assert_eq!(layers.len(), num_layers);
+        debug_assert_eq!(layers[num_layers - 1].len(), 1);
 
         Self { layers, leaves }
     }
@@ -190,29 +190,19 @@ impl<F: FieldExt> BatchedMerkleProof<F> {
 
     pub fn verify(&self, leaves: Vec<F>, root: [u8; 32]) {
         let num_proofs = self.indices.len() / self.depth;
-        assert_eq!(leaves.len(), num_proofs);
+        debug_assert_eq!(leaves.len(), num_proofs);
 
         for i in 0..num_proofs {
             let indices = self.indices[(i * self.depth)..(i * self.depth) + self.depth].to_vec();
-            assert_eq!(indices.len(), self.depth);
+            debug_assert_eq!(indices.len(), self.depth);
             let mut current_hash = leaves[i].to_repr();
             let mut leaf_index = self.leaf_indices[i];
             for index in indices {
-                // println!("lhs: {:?}", U256::from_little_endian(&current_hash));
                 current_hash = if leaf_index & 1 == 0 {
                     hash_two(&[current_hash, self.hashes[index]])
                 } else {
                     hash_two(&[self.hashes[index], current_hash])
                 };
-                /*
-                println!("leaf_index: {:?}", leaf_index);
-                println!("sibling_index: {:?}", index);
-                println!(
-                    "sibling: {:?}",
-                    U256::from_little_endian(&self.hashes[index])
-                );
-                println!("hash: {:?}", U256::from_little_endian(&current_hash));
-                 */
                 leaf_index >>= 1;
             }
             assert_eq!(current_hash, root);
