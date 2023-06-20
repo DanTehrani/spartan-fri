@@ -24,16 +24,15 @@ impl<F: FieldExt, ML_PCS: MultilinearPCS<F>> SpartanVerifier<F, ML_PCS> {
         let tau = transcript.challenge_vec(m);
         let rx = transcript.challenge_vec(m);
 
-        let (ex, sum) = SumCheckPhase1::verify_round_polys(&proof.sc_proof_1, &rx);
-        // TODO: The sum should be zero.
+        let ex = SumCheckPhase1::verify_round_polys(&proof.sc_proof_1, &rx);
 
         // The final eval should equal
         let v_A = proof.v_A;
         let v_B = proof.v_B;
         let v_C = proof.v_C;
 
-        let T_1_eq = EqPoly::new(tau);
-        let T_1 = (v_A + v_B - v_C) * T_1_eq.eval(&rx);
+        let T_1_eq: EqPoly<F> = EqPoly::new(tau);
+        let T_1 = (v_A * v_B - v_C) * T_1_eq.eval(&rx);
         assert_eq!(T_1, ex);
 
         transcript.append_fe(&v_A);
@@ -45,16 +44,40 @@ impl<F: FieldExt, ML_PCS: MultilinearPCS<F>> SpartanVerifier<F, ML_PCS> {
         let r_B = r[1];
         let r_C = r[2];
 
-        let ry = transcript.challenge_vec(m);
-        let (sum_claim, final_poly_eval) =
-            SumCheckPhase2::verify_round_polys(&proof.sc_proof_2, &ry);
+        let T_2 = r_A * v_A + r_B * v_B + r_C * v_C;
 
+        let ry = transcript.challenge_vec(m);
+        let final_poly_eval = SumCheckPhase2::verify_round_polys(T_2, &proof.sc_proof_2, &ry);
+
+        let rx_ry = [rx, ry.clone()].concat();
         assert_eq!(proof.z_eval_proof.x(), ry);
+        assert_eq!(proof.A_eval_proof.x(), rx_ry);
+        assert_eq!(proof.B_eval_proof.x(), rx_ry);
+        assert_eq!(proof.C_eval_proof.x(), rx_ry);
 
         let z_eval = proof.z_eval_proof.y();
         let A_eval = proof.A_eval_proof.y();
         let B_eval = proof.B_eval_proof.y();
         let C_eval = proof.C_eval_proof.y();
+
+        self.pcs
+            .verify(&proof.z_eval_proof, &proof.z_comm, &mut transcript);
+
+        self.pcs.verify(
+            &proof.A_eval_proof,
+            &self.index_r1cs.a_comm,
+            &mut transcript,
+        );
+        self.pcs.verify(
+            &proof.B_eval_proof,
+            &self.index_r1cs.b_comm,
+            &mut transcript,
+        );
+        self.pcs.verify(
+            &proof.C_eval_proof,
+            &self.index_r1cs.c_comm,
+            &mut transcript,
+        );
 
         let T_opened = (r_A * A_eval + r_B * B_eval + r_C * C_eval) * z_eval;
         assert_eq!(T_opened, final_poly_eval);

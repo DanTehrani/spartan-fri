@@ -10,42 +10,50 @@ pub struct SCPhase2Proof<F: FieldExt> {
 }
 
 pub struct SumCheckPhase2<F: FieldExt> {
-    Az_poly: MlPoly<F>,
-    Bz_poly: MlPoly<F>,
-    Cz_poly: MlPoly<F>,
+    A_mle: MlPoly<F>,
+    B_mle: MlPoly<F>,
+    C_mle: MlPoly<F>,
+    Z_mle: MlPoly<F>,
+    rx: Vec<F>,
     r: [F; 3],
     challenge: Vec<F>,
 }
 
 impl<F: FieldExt> SumCheckPhase2<F> {
     pub fn new(
-        Az_poly: MlPoly<F>,
-        Bz_poly: MlPoly<F>,
-        Cz_poly: MlPoly<F>,
+        A_mle: MlPoly<F>,
+        B_mle: MlPoly<F>,
+        C_mle: MlPoly<F>,
+        Z_mle: MlPoly<F>,
+        rx: Vec<F>,
         r: [F; 3],
         challenge: Vec<F>,
     ) -> Self {
         Self {
-            Az_poly,
-            Bz_poly,
-            Cz_poly,
+            A_mle,
+            B_mle,
+            C_mle,
+            Z_mle,
+            rx,
             r,
             challenge,
         }
     }
 
     fn eval_poly(&self, vars: &[F]) -> F {
-        debug_assert_eq!(vars.len(), self.Az_poly.num_vars);
+        debug_assert_eq!(vars.len(), self.A_mle.num_vars / 2);
 
         let r_A = self.r[0];
         let r_B = self.r[1];
         let r_C = self.r[2];
 
-        let eval = self.Az_poly.eval(vars) * r_A
-            + self.Bz_poly.eval(vars) * r_B
-            + self.Cz_poly.eval(vars) * r_C;
+        let z_eval = self.Z_mle.eval(&vars);
+        let eval_at = [vars, self.rx.as_slice()].concat();
+        let a_eval = self.A_mle.eval(&eval_at) * z_eval;
+        let b_eval = self.B_mle.eval(&eval_at) * z_eval;
+        let c_eval = self.C_mle.eval(&eval_at) * z_eval;
 
-        eval
+        a_eval * r_A + b_eval * r_B + c_eval * r_C
     }
 
     pub fn round(&self, j: usize) -> UniPoly<F> {
@@ -54,7 +62,7 @@ impl<F: FieldExt> SumCheckPhase2<F> {
         let zero = F::ZERO;
         let one = F::ONE;
 
-        let m = self.Az_poly.num_vars;
+        let m = self.A_mle.num_vars / 2;
         let mut evals = [F::ZERO; 3];
 
         for vars in &boolean_hypercube(m - j - 1) {
@@ -81,10 +89,10 @@ impl<F: FieldExt> SumCheckPhase2<F> {
     }
 
     pub fn prove(&self) -> SCPhase2Proof<F> {
-        let num_vars = self.Az_poly.num_vars;
-        let mut round_polys = Vec::<UniPoly<F>>::with_capacity(num_vars);
+        let num_vars = self.A_mle.num_vars / 2;
+        let mut round_polys = Vec::<UniPoly<F>>::with_capacity(num_vars - 1);
 
-        for i in 0..num_vars {
+        for i in 0..(num_vars - 1) {
             let round_poly = self.round(i);
             round_polys.push(round_poly);
         }
@@ -92,28 +100,28 @@ impl<F: FieldExt> SumCheckPhase2<F> {
         SCPhase2Proof { round_polys }
     }
 
-    pub fn verify_round_polys(proof: &SCPhase2Proof<F>, challenge: &[F]) -> (F, F) {
+    pub fn verify_round_polys(sum_target: F, proof: &SCPhase2Proof<F>, challenge: &[F]) -> F {
+        debug_assert_eq!(proof.round_polys.len(), challenge.len() - 1);
         let m = challenge.len();
 
         let zero = F::ZERO;
         let one = F::ONE;
 
         let round_polys = &proof.round_polys;
-        let sum_claim = round_polys[0].eval(zero) + round_polys[0].eval(one);
 
-        for i in 0..(m - 1) {
-            let round_poly = &round_polys[i];
-            let round_poly_eval = round_poly.eval(challenge[i]);
-            let next_round_poly = &round_polys[i + 1];
-            let eval_0 = next_round_poly.eval(zero);
-            let eval_1 = next_round_poly.eval(one);
-
-            assert_eq!(round_poly_eval, eval_0 + eval_1);
+        let mut target = sum_target;
+        for (i, round_poly) in proof.round_polys.iter().enumerate() {
+            assert_eq!(
+                round_poly.eval(zero) + round_poly.eval(one),
+                target,
+                "i = {}",
+                i
+            );
+            target = round_poly.eval(challenge[i]);
         }
 
-        let final_poly_eval = round_polys[m - 1].eval(challenge[m - 1]);
-
-        (sum_claim, final_poly_eval)
+        let final_poly_eval = round_polys[m - 2].eval(challenge[m - 1]);
+        final_poly_eval
     }
 }
 

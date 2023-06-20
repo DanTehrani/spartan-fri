@@ -1,6 +1,5 @@
 mod fft;
-mod fri_prover;
-mod fri_verifier;
+mod fri;
 pub mod tree;
 mod unipoly;
 mod utils;
@@ -9,8 +8,7 @@ use crate::{FieldExt, MultilinearPCS, MultilinearPCSOpening};
 use serde::{Deserialize, Serialize};
 use tree::MerkleProof;
 
-pub use fri_prover::FRIMLPolyCommitProver;
-pub use fri_verifier::FRIMLPolyCommitVerifier;
+pub use fri::FRIMLPolyCommit;
 pub use unipoly::UniPoly;
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -189,13 +187,13 @@ mod tests {
         let eval_at = (0..m).map(|i| F::from(i as u64)).collect::<Vec<F>>();
 
         let mut prover_transcript = Transcript::<F>::new(b"test");
-        let fri_prover = FRIMLPolyCommitProver::new(fri_config.clone());
+        let fri = FRIMLPolyCommit::new(fri_config.clone());
         let prove_timer = start_timer!(|| "prove");
-        let proof = fri_prover.prove_eval(&ml_poly, &eval_at, &mut prover_transcript);
+        let comm = fri.commit(&ml_poly);
+        let proof = fri.prove_eval(&ml_poly, &eval_at, &mut prover_transcript);
         end_timer!(prove_timer);
 
         let mut verifier_transcript = Transcript::<F>::new(b"test");
-        let fri_verifier = FRIMLPolyCommitVerifier::new(fri_config);
-        fri_verifier.verify(&proof, &mut verifier_transcript);
+        fri.verify(&proof, &comm, &mut verifier_transcript);
     }
 }

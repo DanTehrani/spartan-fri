@@ -21,12 +21,13 @@ where
     }
 
     pub fn to_ml_extension(&self, s: usize) -> MlPoly<F> {
+        let two_pow_s = 2usize.pow(s as u32);
         let mut evals = vec![F::ZERO; 2usize.pow(2 * s as u32)];
         for i in 0..self.0.len() {
             let row = self.0[i].0;
             let col = self.0[i].1;
             let val = self.0[i].2;
-            evals[row * 2usize.pow(s as u32) + col] = val;
+            evals[row * two_pow_s + col] = val;
         }
 
         let ml_poly = MlPoly::new(evals);
@@ -130,14 +131,16 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::spartan::utils::boolean_hypercube;
+
     use super::*;
     use pasta_curves::Fp;
 
     #[test]
     fn test_r1cs() {
-        let num_cons = 20;
-        let num_vars = 10;
-        let num_input = 5;
+        let num_cons = 2usize.pow(5);
+        let num_vars = num_cons;
+        let num_input = 0;
 
         let (r1cs, mut witness) = R1CS::<Fp>::produce_synthetic_r1cs(num_cons, num_vars, num_input);
 
@@ -151,9 +154,34 @@ mod tests {
         assert!(r1cs.is_sat(&r1cs.public_input, &witness) == false);
         witness[0] = witness[0] - Fp::one();
 
+        println!("r1cs.A: {:?}", r1cs.A.0);
+        /*
         // Should assert if the public input is invalid
         let mut public_input = r1cs.public_input.clone();
         public_input[0] = public_input[0] + Fp::one();
         assert!(r1cs.is_sat(&witness, &public_input) == false);
+         */
+
+        // Test MLE
+        let s = (num_vars as f64).log2() as usize;
+        let A_mle = r1cs.A.to_ml_extension(s);
+        let B_mle = r1cs.B.to_ml_extension(s);
+        let C_mle = r1cs.C.to_ml_extension(s);
+        let Z_mle = MlPoly::new(witness);
+
+        for c in &boolean_hypercube(s) {
+            let mut eval_a = Fp::zero();
+            let mut eval_b = Fp::zero();
+            let mut eval_c = Fp::zero();
+            for b in &boolean_hypercube(s) {
+                let z_eval = Z_mle.eval(b);
+                let eval_matrix = [b.as_slice(), c.as_slice()].concat();
+                eval_a += A_mle.eval(&eval_matrix) * z_eval;
+                eval_b += B_mle.eval(&eval_matrix) * z_eval;
+                eval_c += C_mle.eval(&eval_matrix) * z_eval;
+            }
+            let eval_con = eval_a * eval_b - eval_c;
+            assert_eq!(eval_con, Fp::zero());
+        }
     }
 }

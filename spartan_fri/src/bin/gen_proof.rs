@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::Write;
 
 use bincode::serialize;
-use spartan_fri::fri::{FRIConfig, FRIMLPolyCommitProver};
+use spartan_fri::fri::{FRIConfig, FRIMLPolyCommit};
 use spartan_fri::spartan::polynomial::ml_poly::MlPoly;
 use spartan_fri::transcript::Transcript;
 use spartan_fri::MultilinearPCS;
@@ -35,8 +35,7 @@ fn main() {
     println!("num_vars: {}", num_vars);
     let fri_config: FRIConfig<F> = gen_config(num_vars);
 
-    let prover: FRIMLPolyCommitProver<pasta_curves::Fp> =
-        FRIMLPolyCommitProver::new(fri_config.clone());
+    let prover: FRIMLPolyCommit<pasta_curves::Fp> = FRIMLPolyCommit::new(fri_config.clone());
     let mut transcript = Transcript::new(b"test");
 
     let n = 2usize.pow(num_vars as u32);
