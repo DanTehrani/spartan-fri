@@ -154,7 +154,6 @@ mod tests {
         assert!(r1cs.is_sat(&r1cs.public_input, &witness) == false);
         witness[0] = witness[0] - Fp::one();
 
-        println!("r1cs.A: {:?}", r1cs.A.0);
         /*
         // Should assert if the public input is invalid
         let mut public_input = r1cs.public_input.clone();

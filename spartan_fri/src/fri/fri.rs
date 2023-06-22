@@ -9,6 +9,7 @@ use crate::transcript::Transcript;
 use crate::FieldExt;
 use crate::MultilinearPCS;
 use ark_std::{end_timer, start_timer};
+use ff::BatchInvert;
 
 #[derive(Clone)]
 pub struct FRIMLPolyCommit<F>
@@ -108,6 +109,7 @@ where
 
         // Commit to the univariate polynomial f(X) which has the
         // same coefficients as the given multilinear polynomial
+        let compute_and_commit_f_timer = start_timer!(|| "Compute and commit f");
         let f_0 = UniPoly::new(ml_poly.coeffs.as_ref().unwrap().clone());
         let f_0_comm = f_0.merkle_commit(&self.config.L[0], transcript);
 
@@ -144,10 +146,13 @@ where
             let f_i_comm = f_i.merkle_commit(&self.config.L[0], transcript);
             f_comms.push(f_i_comm);
         }
+        end_timer!(compute_and_commit_f_timer);
 
         // Get the challenge point to evaluate f_0,f_1,...,f_{m-1}
         let beta = transcript.challenge_fe();
         debug_assert_eq!((-beta).square(), beta.square());
+        let beta_squared = beta.square();
+        let minus_beta = -beta;
 
         // Compute quotient codewords for all evaluation challenges
         let mut quotient_codewords = Vec::with_capacity(f_comms.len() * 3);
@@ -155,12 +160,13 @@ where
         let mut f_i_evals_beta = Vec::with_capacity(m);
         let mut f_i_evals_beta_squared = Vec::with_capacity(m - 1);
 
+        let compute_quotient_codewords_timer = start_timer!(|| "Compute quotient codewords");
         for i in 0..m {
             let f_i = &f_comms[i];
 
             // Evaluate the polynomial at beta, -beta, and beta^2
             let f_i_eval_beta = f_i.eval(beta);
-            let f_i_eval_minus_beta = f_i.eval(-beta);
+            let f_i_eval_minus_beta = f_i.eval(minus_beta);
 
             // Derive the codewords of the quotient polynomials
             // about the evaluations above
@@ -174,7 +180,7 @@ where
             quotient_codewords.push(Self::to_quotient_codeword(
                 &f_i.codeword(),
                 &self.config.L[0],
-                -beta,
+                minus_beta,
                 f_i_eval_minus_beta,
             ));
 
@@ -182,16 +188,17 @@ where
 
             if i != m - 1 {
                 let f_i_next = &f_comms[i + 1];
-                let f_i_next_eval_beta_squared = f_i_next.eval(beta.square());
+                let f_i_next_eval_beta_squared = f_i_next.eval(beta_squared);
                 quotient_codewords.push(Self::to_quotient_codeword(
                     &f_i_next.codeword(),
                     &self.config.L[0],
-                    beta.square(),
+                    beta_squared,
                     f_i_next_eval_beta_squared,
                 ));
                 f_i_evals_beta_squared.push(f_i_next_eval_beta_squared);
             }
         }
+        end_timer!(compute_quotient_codewords_timer);
 
         // ##########################################
         // Compute the codeword of g(X),
@@ -204,7 +211,7 @@ where
 
         let mut poly_degree = (quotient_codewords[0].len() / self.config.expansion_factor) - 1;
 
-        let derive_quotient_code_word_timer = start_timer!(|| "Derive quotient codeword");
+        let combine_quotient_codewords_timer = start_timer!(|| "Combine quotient codewords");
         for i in 0..quotient_codewords.len() {
             // Compute the challenges (i.e. random weights)
             let alpha = transcript.challenge_fe();
@@ -218,6 +225,7 @@ where
                 .iter()
                 .enumerate()
                 .map(|(j, e)| {
+                    // TODO: Optimize this
                     let weighted = alpha * e
                         + beta * e * self.config.L[0][j].pow(&[pad_degree as u64, 0, 0, 0]);
 
@@ -233,7 +241,7 @@ where
                 poly_degree /= 2;
             }
         }
-        end_timer!(derive_quotient_code_word_timer);
+        end_timer!(combine_quotient_codewords_timer);
 
         // ##########################################
         // Commit phase for g(X)
@@ -284,10 +292,13 @@ where
     }
 
     fn to_quotient_codeword(codeword: &[F], domain: &[F], z: F, y: F) -> Vec<F> {
+        let mut denominators = domain.iter().map(|x| *x - z).collect::<Vec<F>>();
+        denominators.iter_mut().batch_invert();
+
         codeword
             .iter()
-            .zip(domain.iter())
-            .map(|(f, x)| (*f - y) * (*x - z).invert().unwrap())
+            .enumerate()
+            .map(|(i, f)| (*f - y) * denominators[i])
             .collect::<Vec<F>>()
     }
 
@@ -440,6 +451,7 @@ where
     }
 
     pub fn verify_folding(&self, proof: &MLPolyEvalProof<F>, beta_challenge: F) {
+        assert_eq!(proof.x.len(), proof.f_i_evals_beta.len());
         let two_inv = F::TWO_INV;
         let two_inv_beta = two_inv * beta_challenge.invert().unwrap();
         let n = proof.f_i_evals_beta.len();
@@ -615,7 +627,6 @@ where
         }
 
         let beta_challenge = transcript.challenge_fe();
-
         self.verify_folding(proof, beta_challenge);
 
         // Compute the challenges of the weighted sum

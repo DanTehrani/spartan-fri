@@ -1,5 +1,3 @@
-// Phase 2 sum-check of Spartan.
-
 use crate::spartan::polynomial::eq_poly::EqPoly;
 use crate::spartan::polynomial::ml_poly::MlPoly;
 use crate::spartan::sumcheck::unipoly::UniPoly;
@@ -12,99 +10,72 @@ pub struct SCPhase1Proof<F: FieldExt> {
 }
 
 pub struct SumCheckPhase1<F: FieldExt> {
-    A_mle: MlPoly<F>,
-    B_mle: MlPoly<F>,
-    C_mle: MlPoly<F>,
-    Z: Vec<F>,
+    Az_poly: MlPoly<F>,
+    Bz_poly: MlPoly<F>,
+    Cz_poly: MlPoly<F>,
     bound_eq_poly: EqPoly<F>,
     challenge: Vec<F>,
 }
 
 impl<F: FieldExt> SumCheckPhase1<F> {
     pub fn new(
-        A_mle: MlPoly<F>,
-        B_mle: MlPoly<F>,
-        C_mle: MlPoly<F>,
-        Z: Vec<F>,
+        Az_poly: MlPoly<F>,
+        Bz_poly: MlPoly<F>,
+        Cz_poly: MlPoly<F>,
         tau: Vec<F>,
         challenge: Vec<F>,
     ) -> Self {
         let bound_eq_poly = EqPoly::new(tau);
         Self {
-            A_mle,
-            B_mle,
-            C_mle,
-            Z,
+            Az_poly,
+            Bz_poly,
+            Cz_poly,
             bound_eq_poly,
             challenge,
         }
     }
 
-    fn eval_poly(&self, vars: &[F]) -> F {
-        let s = self.A_mle.num_vars / 2;
-        debug_assert_eq!(vars.len(), s);
-
-        let mut a_eval = F::ZERO;
-        let mut b_eval = F::ZERO;
-        let mut c_eval = F::ZERO;
-
-        // Create an eq_poly evaluation (for the mle) table for the first s variables.
-        // Run a dot product for the last s - j variables
-
-        for (i, b) in boolean_hypercube(s).iter().enumerate() {
-            let z_eval = self.Z[i];
-            let eval_at = [b.as_slice(), vars].concat();
-            // Precompute the eq evaluation table and run dot products?
-            a_eval += self.A_mle.eval(&eval_at) * z_eval;
-            b_eval += self.B_mle.eval(&eval_at) * z_eval;
-            c_eval += self.C_mle.eval(&eval_at) * z_eval;
-        }
-
-        (a_eval * b_eval - c_eval) * self.bound_eq_poly.eval(vars)
-    }
-
-    pub fn round(&self, j: usize) -> UniPoly<F> {
-        // evaluate at points 0, 1, 2, 3
-
-        let zero = F::ZERO;
-        let one = F::ONE;
-
-        let m = self.A_mle.num_vars / 2;
-        let mut evals = [F::ZERO; 4];
-
-        for (i, vars) in boolean_hypercube(m - j - 1).iter().enumerate() {
-            let mut eval_at = vec![];
-
-            // Eval at 0
-            eval_at.extend_from_slice(&self.challenge[..j]);
-            eval_at.push(zero);
-            eval_at.extend_from_slice(vars);
-
-            evals[0] += self.eval_poly(&eval_at);
-
-            // Eval at 1
-            eval_at[j] = one;
-            evals[1] += self.eval_poly(&eval_at);
-
-            // Eval at 2
-            eval_at[j] = F::from(2u64);
-            evals[2] += self.eval_poly(&eval_at);
-
-            // Eval at 3
-            eval_at[j] = F::from(3u64);
-            evals[3] += self.eval_poly(&eval_at);
-        }
-
-        let round_poly = UniPoly::interpolate(&evals);
-        round_poly
-    }
-
     pub fn prove(&self) -> SCPhase1Proof<F> {
-        let num_vars = self.A_mle.num_vars / 2;
+        let num_vars = self.Az_poly.num_vars;
         let mut round_polys = Vec::<UniPoly<F>>::with_capacity(num_vars - 1);
 
-        for i in 0..(num_vars - 1) {
-            let round_poly = self.round(i);
+        let mut A_table = self.Az_poly.evals.clone();
+        let mut B_table = self.Bz_poly.evals.clone();
+        let mut C_table = self.Cz_poly.evals.clone();
+        let mut eq_table = boolean_hypercube(num_vars)
+            .iter()
+            .map(|b| self.bound_eq_poly.eval(b))
+            .collect::<Vec<F>>();
+
+        for j in 0..num_vars {
+            let zero = F::ZERO;
+            let one = F::ONE;
+
+            let m = self.Az_poly.num_vars;
+
+            let high_index = 2usize.pow((m - j - 1) as u32);
+
+            let mut evals = [F::ZERO; 4];
+
+            // https://eprint.iacr.org/2019/317.pdf#subsection.3.2
+            for b in 0..high_index {
+                for (i, eval_at) in [zero, one, F::from(2), F::from(3)].iter().enumerate() {
+                    let a_eval = A_table[b] + (A_table[b + high_index] - A_table[b]) * eval_at;
+                    let b_eval = B_table[b] + (B_table[b + high_index] - B_table[b]) * eval_at;
+                    let c_eval = C_table[b] + (C_table[b + high_index] - C_table[b]) * eval_at;
+                    let eq_eval = eq_table[b] + (eq_table[b + high_index] - eq_table[b]) * eval_at;
+                    evals[i] += (a_eval * b_eval - c_eval) * eq_eval;
+                }
+
+                let r_i = self.challenge[j];
+                A_table[b] = A_table[b] + (A_table[b + high_index] - A_table[b]) * r_i;
+                B_table[b] = B_table[b] + (B_table[b + high_index] - B_table[b]) * r_i;
+                C_table[b] = C_table[b] + (C_table[b + high_index] - C_table[b]) * r_i;
+                eq_table[b] = eq_table[b] + (eq_table[b + high_index] - eq_table[b]) * r_i;
+            }
+
+            let round_poly = UniPoly::interpolate(&evals);
+
             round_polys.push(round_poly);
         }
 
@@ -112,22 +83,23 @@ impl<F: FieldExt> SumCheckPhase1<F> {
     }
 
     pub fn verify_round_polys(proof: &SCPhase1Proof<F>, challenge: &[F]) -> F {
-        debug_assert_eq!(proof.round_polys.len(), challenge.len() - 1);
-        let m = challenge.len();
+        debug_assert_eq!(proof.round_polys.len(), challenge.len());
 
         let zero = F::ZERO;
         let one = F::ONE;
 
-        let round_polys = &proof.round_polys;
-
         let mut target = zero;
         for (i, round_poly) in proof.round_polys.iter().enumerate() {
-            assert_eq!(round_poly.eval(zero) + round_poly.eval(one), target);
+            assert_eq!(
+                round_poly.eval(zero) + round_poly.eval(one),
+                target,
+                "round poly {} failed",
+                i
+            );
             target = round_poly.eval(challenge[i]);
         }
 
-        let final_poly_eval = round_polys[m - 2].eval(challenge[m - 1]);
-        final_poly_eval
+        target
     }
 }
 

@@ -1,5 +1,6 @@
 use crate::FieldExt;
 
+// Returns a vector of vectors of length m, where each vector is a boolean vector (little endian)
 pub fn boolean_hypercube<F: FieldExt>(m: usize) -> Vec<Vec<F>> {
     let n = 2usize.pow(m as u32);
 

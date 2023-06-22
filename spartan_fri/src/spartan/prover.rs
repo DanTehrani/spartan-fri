@@ -2,6 +2,7 @@
 use std::marker::PhantomData;
 use std::time::Instant;
 
+use crate::spartan::polynomial::eq_poly::EqPoly;
 use crate::spartan::polynomial::ml_poly::MlPoly;
 use crate::spartan::sumcheck::{SumCheckPhase1, SumCheckPhase2};
 use crate::spartan::SpartanProof;
@@ -58,6 +59,11 @@ impl<F: FieldExt, PCS: MultilinearPCS<F>> SpartanProver<F, PCS> {
 
         // G_poly = A_poly * B_poly - C_poly
 
+        let num_rows = self.r1cs.num_cons;
+        let Az_poly = MlPoly::new(self.r1cs.A.mul_vector(num_rows, witness));
+        let Bz_poly = MlPoly::new(self.r1cs.B.mul_vector(num_rows, witness));
+        let Cz_poly = MlPoly::new(self.r1cs.C.mul_vector(num_rows, witness));
+
         // Prove that the polynomial Q(t)
         // \sum_{x \in {0, 1}^m} (Az_poly(x) * Bz_poly(x) - Cz_poly(x)) eq(tau, x)
         // is a zero-polynomial using the sum-check protocol.
@@ -76,10 +82,9 @@ impl<F: FieldExt, PCS: MultilinearPCS<F>> SpartanProver<F, PCS> {
 
         let sc_phase_1_start = Instant::now();
         let sc_phase_1 = SumCheckPhase1::new(
-            A_mle.clone(),
-            B_mle.clone(),
-            C_mle.clone(),
-            witness.to_vec(),
+            Az_poly.clone(),
+            Bz_poly.clone(),
+            Cz_poly.clone(),
             tau.clone(),
             rx.clone(),
         );
@@ -88,9 +93,12 @@ impl<F: FieldExt, PCS: MultilinearPCS<F>> SpartanProver<F, PCS> {
         let mut v_A = F::ZERO;
         let mut v_B = F::ZERO;
         let mut v_C = F::ZERO;
-        for b in &boolean_hypercube(s) {
-            let z_eval = witness_poly.eval(&b);
-            let eval_at = [b.as_slice(), &rx].concat();
+        for (i, b) in boolean_hypercube(s).iter().enumerate() {
+            let z_eval = witness[i];
+            let mut r_x = rx.to_vec();
+            r_x.reverse();
+
+            let eval_at = [b.as_slice(), &r_x].concat();
             v_A += A_mle.eval(&eval_at) * z_eval;
             v_B += B_mle.eval(&eval_at) * z_eval;
             v_C += C_mle.eval(&eval_at) * z_eval;
@@ -127,15 +135,22 @@ impl<F: FieldExt, PCS: MultilinearPCS<F>> SpartanProver<F, PCS> {
         let sc_proof_2 = sc_phase_2.prove();
         println!("Sumcheck phase 2: {:?}", sc_phase_2_start.elapsed());
 
+        let mut ry_rev = ry.clone();
+        ry_rev.reverse();
         let z_open_start = Instant::now();
         // Prove the evaluation of the polynomial Z(y) at ry
-        let z_eval_proof = self.pcs_witness.open(&witness_poly, &ry, &mut transcript);
+        let z_eval_proof = self
+            .pcs_witness
+            .open(&witness_poly, &ry_rev, &mut transcript);
         println!("Open witness poly: {:?}", z_open_start.elapsed());
 
         // Prove the evaluation of the polynomials A(y), B(y), C(y) at ry
 
         let open_matrices_start = Instant::now();
-        let rx_ry = vec![rx, ry].concat();
+        let mut rx_rev = rx.clone();
+        rx_rev.reverse();
+
+        let rx_ry = vec![ry_rev, rx_rev].concat();
         let A_eval_proof = self.pcs_index.open(&A_mle, &rx_ry, &mut transcript);
         let B_eval_proof = self.pcs_index.open(&B_mle, &rx_ry, &mut transcript);
         let C_eval_proof = self.pcs_index.open(&C_mle, &rx_ry, &mut transcript);

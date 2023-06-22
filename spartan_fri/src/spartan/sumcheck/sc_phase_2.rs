@@ -48,7 +48,9 @@ impl<F: FieldExt> SumCheckPhase2<F> {
         let r_C = self.r[2];
 
         let z_eval = self.Z_mle.eval(&vars);
-        let eval_at = [vars, self.rx.as_slice()].concat();
+        let mut r_x = self.rx.clone();
+        r_x.reverse();
+        let eval_at = [&vars, r_x.as_slice()].concat();
         let a_eval = self.A_mle.eval(&eval_at) * z_eval;
         let b_eval = self.B_mle.eval(&eval_at) * z_eval;
         let c_eval = self.C_mle.eval(&eval_at) * z_eval;
@@ -66,21 +68,19 @@ impl<F: FieldExt> SumCheckPhase2<F> {
         let mut evals = [F::ZERO; 3];
 
         for vars in &boolean_hypercube(m - j - 1) {
-            let mut eval_at = vec![];
+            let mut c = self.challenge[..j].to_vec();
+            c.reverse();
+            let mut eval_at = vec![vars.as_slice(), &[zero], &c].concat();
 
             // Eval at 0
-            eval_at.extend_from_slice(&self.challenge[..j]);
-            eval_at.push(zero);
-            eval_at.extend_from_slice(vars);
-
             evals[0] += self.eval_poly(&eval_at);
 
             // Eval at 1
-            eval_at[j] = one;
+            eval_at[vars.len()] = one;
             evals[1] += self.eval_poly(&eval_at);
 
             // Eval at 2
-            eval_at[j] = F::from(2u64);
+            eval_at[vars.len()] = F::from(2u64);
             evals[2] += self.eval_poly(&eval_at);
         }
 
@@ -92,7 +92,7 @@ impl<F: FieldExt> SumCheckPhase2<F> {
         let num_vars = self.A_mle.num_vars / 2;
         let mut round_polys = Vec::<UniPoly<F>>::with_capacity(num_vars - 1);
 
-        for i in 0..(num_vars - 1) {
+        for i in 0..num_vars {
             let round_poly = self.round(i);
             round_polys.push(round_poly);
         }
@@ -101,13 +101,10 @@ impl<F: FieldExt> SumCheckPhase2<F> {
     }
 
     pub fn verify_round_polys(sum_target: F, proof: &SCPhase2Proof<F>, challenge: &[F]) -> F {
-        debug_assert_eq!(proof.round_polys.len(), challenge.len() - 1);
-        let m = challenge.len();
+        debug_assert_eq!(proof.round_polys.len(), challenge.len());
 
         let zero = F::ZERO;
         let one = F::ONE;
-
-        let round_polys = &proof.round_polys;
 
         let mut target = sum_target;
         for (i, round_poly) in proof.round_polys.iter().enumerate() {
@@ -120,8 +117,7 @@ impl<F: FieldExt> SumCheckPhase2<F> {
             target = round_poly.eval(challenge[i]);
         }
 
-        let final_poly_eval = round_polys[m - 2].eval(challenge[m - 1]);
-        final_poly_eval
+        target
     }
 }
 

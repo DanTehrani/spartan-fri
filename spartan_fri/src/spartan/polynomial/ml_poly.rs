@@ -1,4 +1,4 @@
-use crate::FieldExt;
+use crate::{spartan::utils::boolean_hypercube, FieldExt};
 use ff::Field;
 
 #[derive(Clone, Debug)]
@@ -43,28 +43,11 @@ impl<F: FieldExt> MlPoly<F> {
         result
     }
 
-    fn boolean_hypercube(m: usize) -> Vec<Vec<F>> {
-        let n = 2usize.pow(m as u32);
-
-        let mut boolean_hypercube = Vec::<Vec<F>>::with_capacity(n);
-
-        for i in 0..n {
-            let mut tmp = Vec::with_capacity(m);
-            for j in 0..m {
-                let i_b = F::from((i >> j & 1) as u64);
-                tmp.push(i_b);
-            }
-            boolean_hypercube.push(tmp);
-        }
-
-        boolean_hypercube
-    }
-
     pub fn from_coeffs(coeffs: Vec<F>) -> Self {
         let n = coeffs.len();
         assert!(n.is_power_of_two());
         let num_vars = (n as f64).log2() as usize;
-        let domain = Self::boolean_hypercube(num_vars);
+        let domain = boolean_hypercube::<F>(num_vars);
 
         let evals = domain
             .iter()
