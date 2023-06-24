@@ -1,7 +1,10 @@
-use crate::{spartan::polynomial::ml_poly::MlPoly, FieldExt};
+use crate::{
+    spartan::polynomial::{ml_poly::MlPoly, sparse_ml_poly::SparseMLPoly},
+    FieldExt,
+};
 
 #[derive(Clone)]
-pub struct Matrix<F>(Vec<(usize, usize, F)>)
+pub struct Matrix<F>(pub Vec<(usize, usize, F)>)
 where
     F: FieldExt;
 

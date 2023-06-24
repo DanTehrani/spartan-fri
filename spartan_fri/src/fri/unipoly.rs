@@ -1,3 +1,5 @@
+use ark_std::{end_timer, start_timer};
+
 use crate::fri::tree::CommittedMerkleTree;
 use crate::transcript::Transcript;
 
@@ -39,6 +41,15 @@ where
             result += *coeff * x.pow(&[i as u64, 0, 0, 0]);
         }
 
+        result
+    }
+
+    pub fn eval_with_table(&self, x_powers_table: &[F]) -> F {
+        debug_assert!(x_powers_table.len() >= self.coeffs.len());
+        let mut result = F::ZERO;
+        for (i, coeff) in self.coeffs.iter().enumerate() {
+            result += *coeff * x_powers_table[i];
+        }
         result
     }
 

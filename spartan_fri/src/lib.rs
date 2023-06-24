@@ -1,25 +1,24 @@
 #![allow(non_snake_case)]
 #![allow(non_camel_case_types)]
 use ff::{FromUniformBytes, PrimeField};
-use fri::{FRIMLPolyCommit, UniPoly};
+use fri::FRIMLPolyCommit;
+//use fri::{FRIMLPolyCommit, UniPoly};
 use pasta_curves::Fp;
 use serde::Serialize;
-use spartan::polynomial::ml_poly::MlPoly;
+use spartan::polynomial::{ml_poly::MlPoly, sparse_ml_poly::SparseMLPoly};
 use spartan::prover::SpartanProver;
 use spartan::verifier::SpartanVerifier;
+use spartan::PartialSpartanProof;
 
 pub mod fri;
 mod r1cs;
 pub mod spartan;
 pub mod transcript;
 
-use spartan::SpartanProof;
-
 pub trait FieldExt: FromUniformBytes<64, Repr = [u8; 32]> + Serialize {}
 
 impl FieldExt for Fp {}
 
-// Commitment scheme for multilinear polynomials
 pub trait MultilinearPCS<F: FieldExt>: Clone {
     type Commitment: AppendToTranscript<F>;
     type Opening: MultilinearPCSOpening<F>;
@@ -27,6 +26,26 @@ pub trait MultilinearPCS<F: FieldExt>: Clone {
     fn new(config: Self::Config) -> Self;
     fn commit(&self, poly: &MlPoly<F>) -> Self::Commitment;
     fn open(&self, poly: &MlPoly<F>, point: &[F], transcript: &mut Transcript<F>) -> Self::Opening;
+    fn verify(
+        &self,
+        opening: &Self::Opening,
+        commitment: &Self::Commitment,
+        transcript: &mut Transcript<F>,
+    );
+}
+// Commitment scheme for multilinear polynomials
+pub trait SparseMultilinearPCS<F: FieldExt>: Clone {
+    type Commitment: AppendToTranscript<F>;
+    type Opening: MultilinearPCSOpening<F>;
+    type Config;
+    fn new(config: Self::Config) -> Self;
+    fn commit(&self, poly: &SparseMLPoly<F>) -> Self::Commitment;
+    fn open(
+        &self,
+        poly: &SparseMLPoly<F>,
+        point: &[F],
+        transcript: &mut Transcript<F>,
+    ) -> Self::Opening;
     fn verify(
         &self,
         opening: &Self::Opening,
@@ -45,7 +64,7 @@ pub trait MultilinearPCSOpening<F: FieldExt>: Clone {
 // #######################
 
 pub type SpartanFRIProver<F> = SpartanProver<F, FRIMLPolyCommit<F>>;
-pub type SpartanFRIProof<F> = SpartanProof<F, FRIMLPolyCommit<F>>;
+pub type SpartanFRIProof<F> = PartialSpartanProof<F, FRIMLPolyCommit<F>>;
 pub use r1cs::R1CS;
 use transcript::{AppendToTranscript, Transcript};
 
@@ -53,11 +72,13 @@ use transcript::{AppendToTranscript, Transcript};
 mod tests {
     use crate::fri::FRIConfig;
     use crate::fri::FRIMLPolyCommit;
+    use crate::spartan::assistant::Assistant;
     use crate::spartan::indexer::Indexer;
     use crate::transcript::Transcript;
     use crate::{MultilinearPCS, SpartanProver, SpartanVerifier, R1CS};
+    use ark_std::end_timer;
+    use ark_std::start_timer;
     use pasta_curves::Fp;
-    use std::time::Instant;
 
     type F = Fp;
 
@@ -75,14 +96,6 @@ mod tests {
         let folding_factor = 2;
         let final_codeword_size = 1;
 
-        let indexer_fri_config = FRIConfig::<F>::new(
-            num_cons * num_vars,
-            expansion_factor,
-            folding_factor,
-            num_queries,
-            final_codeword_size,
-        );
-
         let fri_config = FRIConfig::<F>::new(
             witness_poly_degree,
             expansion_factor,
@@ -91,30 +104,39 @@ mod tests {
             final_codeword_size,
         );
         let pcs_witness = FRIMLPolyCommit::<F>::new(fri_config);
+
+        // #####################
+        // Prover
+        // #####################
+
+        let proving_timer = start_timer!(|| "Proving");
+        let prover = SpartanProver::<F, FRIMLPolyCommit<F>>::new(r1cs.clone(), pcs_witness.clone());
+        let mut prover_transcript = Transcript::<F>::new(b"test_spartan");
+        let (partial_proof, rx_ry) = prover.prove(&witness, &mut prover_transcript);
+        end_timer!(proving_timer);
+
+        // #####################
+        // Assistant
+        // #####################
+        let indexer_fri_config = FRIConfig::<F>::new(
+            num_cons * num_vars,
+            expansion_factor,
+            folding_factor,
+            num_queries,
+            final_codeword_size,
+        );
         let pcs_indexer = FRIMLPolyCommit::<F>::new(indexer_fri_config);
 
-        let indexer_start = Instant::now();
-        println!("Preprocessing R1CS...");
         // Pre-process the R1CS
         let indexer = Indexer::new(r1cs.clone(), pcs_indexer.clone());
         let index_r1cs = indexer.pre_process();
-        println!("Preprocessing R1CS... Done");
-        println!("Preprocess: {:.2?}", indexer_start.elapsed(),);
 
-        println!("Proving...");
-        let prover = SpartanProver::<F, FRIMLPolyCommit<F>>::new(
-            r1cs.clone(),
-            pcs_witness.clone(),
-            pcs_indexer.clone(),
-        );
-        let prover_transcript = Transcript::<F>::new(b"test_spartan");
-        let mut proof = prover.prove(&witness, &prover_transcript);
-        println!("Proving... Done");
-
+        let assistant = Assistant::new(r1cs.clone(), pcs_indexer.clone());
+        let full_proof = assistant.complete_proof(partial_proof, &rx_ry, &mut prover_transcript);
         let verifier = SpartanVerifier::new(index_r1cs, pcs_witness.clone(), pcs_indexer.clone());
         let verifier_transcript = Transcript::<F>::new(b"test_spartan");
         assert!(
-            verifier.verify(&proof, &verifier_transcript),
+            verifier.verify(&full_proof, &verifier_transcript),
             "Verification failed"
         );
 

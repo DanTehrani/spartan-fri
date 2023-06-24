@@ -1,46 +1,66 @@
+use crate::fri::sparse_unipoly::SparseUniPoly;
 use crate::fri::tree::CommittedMerkleTree;
 use crate::fri::unipoly::UniPoly;
 use crate::fri::utils::{reduce_indices, sample_indices};
 use crate::fri::{
-    FRIConfig, FirstRoundBoundedPolyOpenings, MLPolyEvalProof, Query, QueryFirstRound, RoundQueries,
+    FirstRoundBoundedPolyOpenings, MLPolyEvalProof, Query, QueryFirstRound, RoundQueries,
+    SparseFRIConfig,
 };
-use crate::spartan::polynomial::ml_poly::MlPoly;
+use crate::spartan::polynomial::sparse_ml_poly::SparseMLPoly;
 use crate::transcript::Transcript;
-use crate::FieldExt;
 use crate::MultilinearPCS;
+use crate::{FieldExt, SparseMultilinearPCS};
 use ark_std::{end_timer, start_timer};
 use ff::BatchInvert;
 
+use super::sparse_unipoly::CommittedSparseUniPoly;
+
 #[derive(Clone)]
-pub struct FRIMLPolyCommit<F>
+pub struct SparseFRIMLPolyCommit<F>
 where
     F: FieldExt,
 {
-    pub config: FRIConfig<F>,
+    pub config: SparseFRIConfig<F>,
 }
 
-impl<F> MultilinearPCS<F> for FRIMLPolyCommit<F>
+impl<F> SparseMultilinearPCS<F> for SparseFRIMLPolyCommit<F>
 where
     F: FieldExt,
 {
     type Commitment = [u8; 32];
     type Opening = MLPolyEvalProof<F>;
-    type Config = FRIConfig<F>;
+    type Config = SparseFRIConfig<F>;
 
     fn new(config: Self::Config) -> Self {
         Self { config }
     }
 
-    fn commit(&self, poly: &MlPoly<F>) -> Self::Commitment {
-        // Compute the evaluations of the polynomial at the domain
-        let poly = UniPoly::new(poly.to_coeffs());
-        let evals = poly.eval_fft(&self.config.L[0]);
-        // TODO: Save this tree for later use
+    // Commit to a multilinear polynomial
+    fn commit(&self, poly: &SparseMLPoly<F>) -> Self::Commitment {
+        // We commit to a univariate polynomials f(X) which has the same
+        // coefficients as the given multilinear polynomial
+        let mut val = self.config.domain_generator(0);
+        let coeffs = (poly.coeffs.clone()).unwrap(); // TODO: Avoid cloning here
+        let domain_size = coeffs.len() * self.config.expansion_factor;
+
+        let mut evals = Vec::with_capacity(domain_size);
+        for _ in 0..domain_size {
+            let eval = poly.eval_as_uni_with_coeffs(&val);
+            evals.push(eval);
+            val *= val;
+        }
+
+        // TODO: Save this tree for later use?
         let tree = CommittedMerkleTree::from_leaves(evals);
         tree.root()
     }
 
-    fn open(&self, poly: &MlPoly<F>, point: &[F], transcript: &mut Transcript<F>) -> Self::Opening {
+    fn open(
+        &self,
+        poly: &SparseMLPoly<F>,
+        point: &[F],
+        transcript: &mut Transcript<F>,
+    ) -> Self::Opening {
         let opening = self.prove_eval(poly, point, transcript);
         opening
     }
@@ -55,40 +75,39 @@ where
     }
 }
 
-impl<F> FRIMLPolyCommit<F>
+impl<F> SparseFRIMLPolyCommit<F>
 where
     F: FieldExt,
 {
-    fn fold(&self, codeword: &[F], domain: &[F], alpha: F) -> Vec<F> {
-        debug_assert!(codeword.len() == domain.len());
-        let two_inv = F::from(2).invert().unwrap();
-        let one = F::from(1);
+    fn fold(&self, poly: &SparseUniPoly<F>, alpha: F) -> SparseUniPoly<F> {
+        let (even_coeffs, odd_coeffs) = poly.to_even_and_odd_coeffs();
 
-        let n = domain.len();
-
-        let folded_codeword_size = n / self.config.folding_factor;
-        let mut folded_codeword = Vec::with_capacity(folded_codeword_size);
-        for i in 0..folded_codeword_size {
-            // f*(w^2i) = 1/2 * ((1 + alpha * w^-i) * f(w^i) + (1 - alpha * w^-i) * f(-w^i))
-            // w^(n/2) = -1
-            // -w^i = domain[i + n/2]
-
-            let omega_pow_minus_i = domain[i].invert().unwrap();
-
-            let f_star_eval = two_inv
-                * ((one + alpha * omega_pow_minus_i) * codeword[i]
-                    + (one - alpha * omega_pow_minus_i) * codeword[i + folded_codeword_size]);
-            folded_codeword.push(f_star_eval);
+        // construct q_i(x) = (f_{i_e}(X) - a_i) / (X - \beta) + alpha * f_{i_o}(X)
+        // Construct f_i(X) = g_{i-1}(X) + alpha * h{i-1}(X)
+        let mut coeffs = vec![F::ZERO; poly.degree + 1];
+        for e in even_coeffs {
+            coeffs[e.0] += e.1;
         }
 
-        folded_codeword
+        for o in odd_coeffs {
+            coeffs[o.0] += o.1 * alpha
+        }
+
+        let dense_coeffs = coeffs
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (i, *c))
+            .filter(|(_, c)| *c != F::ZERO)
+            .collect();
+
+        SparseUniPoly::new(dense_coeffs, poly.degree / 2)
     }
 
     // Prove that the evaluation of a multilinear polynomial f(x_0, ..., x_{m-1})
     // at the point (x_0, ..., x_{m-1})
     pub fn prove_eval(
         &self,
-        ml_poly: &MlPoly<F>,
+        ml_poly: &SparseMLPoly<F>,
         x: &[F],
         transcript: &mut Transcript<F>,
     ) -> MLPolyEvalProof<F> {
@@ -102,47 +121,64 @@ where
         let m = x.len();
 
         // Evaluate the polynomial the point (x_0, ..., x_{m-1})
-        let eval_timer = start_timer!(|| "Eval");
         let y = ml_poly.eval(x);
-        end_timer!(eval_timer);
 
         // Commit to the univariate polynomial f(X) which has the
         // same coefficients as the given multilinear polynomial
         let compute_and_commit_f_timer = start_timer!(|| "Compute and commit f");
-        let f_0 = UniPoly::new(ml_poly.coeffs.as_ref().unwrap().clone());
-        let f_0_comm = f_0.merkle_commit(&self.config.L[0], transcript);
+        let coeffs = ml_poly.coeffs.clone().unwrap();
+        let f_0 = SparseUniPoly::new(coeffs, 2usize.pow(m as u32) - 1);
+        let f_0_comm = f_0.merkle_commit(
+            self.config.domain_generator(0),
+            self.config.expansion_factor,
+            transcript,
+        );
 
         let mut f_comms = Vec::with_capacity(m);
 
         f_comms.push(f_0_comm.clone());
 
         let codeword = f_0_comm.committed_merkle_tree.leaves();
-        let target_codeword_size = self.config.L[0].len();
-
-        debug_assert_eq!(codeword.len(), target_codeword_size);
 
         // ##########################################
         // Compute and commitments to f_1,...,f_m
         // ##########################################
 
+        let mut num_coeffs = 2usize.pow(m as u32);
         for i in 1..m {
             // Combine the even and odd coefficients by z;
             let (even_coeffs, odd_coeffs) = f_comms[i - 1].to_even_and_odd_coeffs();
 
-            // Construct f_i(X) = g_{i-1}(X) * x[i] * h{i-1}(X)
-            let coeffs = even_coeffs
+            // Construct f_i(X) = g_{i-1}(X) + x[i] * h{i-1}(X)
+            let mut coeffs = vec![F::ZERO; num_coeffs / 2];
+            for e in even_coeffs {
+                coeffs[e.0] += e.1;
+            }
+
+            for o in odd_coeffs {
+                coeffs[o.0] += o.1 * x[i - 1];
+            }
+
+            let sparse_coeffs = coeffs
                 .iter()
-                .zip(odd_coeffs.iter())
-                .map(|(e, o)| *e + *o * x[i - 1])
-                .collect::<Vec<F>>();
-            let f_i = UniPoly::new(coeffs);
+                .enumerate()
+                .map(|(i, c)| (i, *c))
+                .filter(|(_, c)| *c != F::ZERO)
+                .collect::<Vec<(usize, F)>>();
+
+            num_coeffs /= 2;
+            let f_i = SparseUniPoly::new(sparse_coeffs, num_coeffs - 1);
 
             // Sanity check
             let f_i_prev = &f_comms[i - 1];
             debug_assert_eq!(f_i_prev.eval(x[i - 1]), f_i.eval(x[i - 1].square()));
 
             // Commit to f_i(X)
-            let f_i_comm = f_i.merkle_commit(&self.config.L[0], transcript);
+            let f_i_comm = f_i.merkle_commit(
+                self.config.domain_generator(i),
+                self.config.expansion_factor,
+                transcript,
+            );
             f_comms.push(f_i_comm);
         }
         end_timer!(compute_and_commit_f_timer);
@@ -153,101 +189,48 @@ where
         let beta_squared = beta.square();
         let minus_beta = -beta;
 
-        // Compute quotient codewords for all evaluation challenges
-        let mut quotient_codewords = Vec::with_capacity(f_comms.len() * 3);
+        // evaluate f_0(x), f_1(x), ..., f_{m-1}(x) at \beta, -\beta
 
-        let mut f_i_evals_beta = Vec::with_capacity(m);
-        let mut f_i_evals_beta_squared = Vec::with_capacity(m - 1);
+        let beta_powers_table = (0..(f_comms[0].degree + 1))
+            .map(|i| beta.pow([i as u64, 0, 0, 0]))
+            .collect::<Vec<F>>();
 
-        let compute_quotient_codewords_timer = start_timer!(|| "Compute quotient codewords");
-        for i in 0..m {
-            let f_i = &f_comms[i];
+        let minus_beta_powers_table = (0..(f_comms[0].degree + 1))
+            .map(|i| {
+                if i & 1 == 0 {
+                    beta_powers_table[i]
+                } else {
+                    -beta_powers_table[i]
+                }
+            })
+            .collect::<Vec<F>>();
 
-            // Evaluate the polynomial at beta, -beta, and beta^2
-            let f_i_eval_beta = f_i.eval(beta);
-            let f_i_eval_minus_beta = f_i.eval(minus_beta);
+        let beta_squared_powers_table = (0..(f_comms[0].degree + 1))
+            .map(|i| beta_squared.pow([i as u64, 0, 0, 0]))
+            .collect::<Vec<F>>();
 
-            // Derive the codewords of the quotient polynomials
-            // about the evaluations above
-            quotient_codewords.push(Self::to_quotient_codeword(
-                &f_i.codeword(),
-                &self.config.L[0],
-                beta,
-                f_i_eval_beta,
-            ));
+        let f_i_evals_beta = f_comms
+            .iter()
+            .map(|c| {
+                (
+                    c.eval_with_table(&beta_powers_table),
+                    c.eval_with_table(&minus_beta_powers_table),
+                )
+            })
+            .collect::<Vec<(F, F)>>();
 
-            quotient_codewords.push(Self::to_quotient_codeword(
-                &f_i.codeword(),
-                &self.config.L[0],
-                minus_beta,
-                f_i_eval_minus_beta,
-            ));
-
-            f_i_evals_beta.push((f_i_eval_beta, f_i_eval_minus_beta));
-
-            if i != m - 1 {
-                let f_i_next = &f_comms[i + 1];
-                let f_i_next_eval_beta_squared = f_i_next.eval(beta_squared);
-                quotient_codewords.push(Self::to_quotient_codeword(
-                    &f_i_next.codeword(),
-                    &self.config.L[0],
-                    beta_squared,
-                    f_i_next_eval_beta_squared,
-                ));
-                f_i_evals_beta_squared.push(f_i_next_eval_beta_squared);
-            }
-        }
-        end_timer!(compute_quotient_codewords_timer);
-
-        // ##########################################
-        // Compute the codeword of g(X),
-        // which is the random linear combination of the quotient codewords
-        // ##########################################
-        let mut g_codeword = vec![F::ZERO; self.config.L[0].len()];
-
-        let quotient_poly_max_degree = ml_poly.evals.len() - 1;
-        let k = quotient_poly_max_degree.next_power_of_two();
-
-        let mut poly_degree = (quotient_codewords[0].len() / self.config.expansion_factor) - 1;
-
-        let combine_quotient_codewords_timer = start_timer!(|| "Combine quotient codewords");
-        for i in 0..quotient_codewords.len() {
-            // Compute the challenges (i.e. random weights)
-            let alpha = transcript.challenge_fe();
-            let beta = transcript.challenge_fe();
-
-            let pad_degree = k - poly_degree - 1;
-
-            debug_assert_eq!(quotient_codewords[i].len(), target_codeword_size);
-
-            let weighed_evals = quotient_codewords[i]
-                .iter()
-                .enumerate()
-                .map(|(j, e)| {
-                    // TODO: Optimize this
-                    let weighted = alpha * e
-                        + beta * e * self.config.L[0][j].pow(&[pad_degree as u64, 0, 0, 0]);
-
-                    weighted
-                })
-                .collect::<Vec<F>>();
-
-            for (j, weighted_eval) in weighed_evals.iter().enumerate() {
-                g_codeword[j] += weighted_eval;
-            }
-
-            if i % 3 == 2 {
-                poly_degree /= 2;
-            }
-        }
-        end_timer!(combine_quotient_codewords_timer);
+        let f_i_evals_beta_squared = f_comms
+            .pop()
+            .iter()
+            .map(|c| c.eval_with_table(&beta_squared_powers_table))
+            .collect::<Vec<F>>();
 
         // ##########################################
         // Commit phase for g(X)
         // ##########################################
 
         let commit_timer = start_timer!(|| "Commit");
-        let (codewords, oracles) = self.commit_phase(g_codeword.clone(), transcript);
+        let g_comms = self.commit_phase(&f_comms, transcript);
         end_timer!(commit_timer);
 
         // ##########################################
@@ -255,138 +238,138 @@ where
         // ##########################################
 
         let query_timer = start_timer!(|| "Query");
-        let sample_indices_timer = start_timer!(|| "Sample indices");
         let mut indices = sample_indices(
             self.config.num_queries,
-            self.config.L[0].len(),
-            self.config.final_codeword_size(),
+            self.config.domain_order_in_round(1),
+            self.config.final_codeword_size,
             transcript,
         );
-        end_timer!(sample_indices_timer);
-        reduce_indices(&mut indices, codewords[0].len());
 
-        let queries_first_round = self.query_first_round(
-            &mut indices,
-            &codeword,
-            &codewords[0],
-            &f_comms
-                .iter()
-                .map(|f_comm| f_comm.committed_merkle_tree.clone())
-                .collect::<Vec<CommittedMerkleTree<F>>>(),
-            &oracles[0],
-        );
+        let f_trees = f_comms
+            .iter()
+            .map(|c| &c.committed_merkle_tree)
+            .collect::<Vec<&CommittedMerkleTree<F>>>();
+        let queries_first_round =
+            self.query_first_round(&mut indices, &f_trees, &g_comms[0].committed_merkle_tree);
 
-        let queries = self.query(&mut indices, &codewords, &oracles, transcript);
+        let g_trees = g_comms
+            .iter()
+            .map(|c| &c.committed_merkle_tree)
+            .collect::<Vec<&CommittedMerkleTree<F>>>();
+        let queries = self.query(&mut indices, &g_trees, transcript);
         end_timer!(query_timer);
+
+        let reduced_codeword = g_trees[g_trees.len() - 1].leaves();
 
         MLPolyEvalProof {
             queries_first_round,
             queries,
             y,
-            reduced_codeword: codewords[codewords.len() - 1].clone(),
+            reduced_codeword,
             f_i_evals_beta,
             f_i_evals_beta_squared,
             x: x.to_vec(),
         }
     }
 
-    fn to_quotient_codeword(codeword: &[F], domain: &[F], z: F, y: F) -> Vec<F> {
-        let mut denominators = domain.iter().map(|x| *x - z).collect::<Vec<F>>();
-        denominators.iter_mut().batch_invert();
-
-        codeword
-            .iter()
-            .enumerate()
-            .map(|(i, f)| (*f - y) * denominators[i])
-            .collect::<Vec<F>>()
-    }
-
     fn commit_phase(
         &self,
-        codeword: Vec<F>,
+        committed_polys: &[CommittedSparseUniPoly<F>],
         transcript: &mut Transcript<F>,
-    ) -> (Vec<Vec<F>>, Vec<CommittedMerkleTree<F>>) {
+    ) -> Vec<CommittedSparseUniPoly<F>> {
         let num_rounds = self.config.num_rounds();
-        let mut trees = Vec::<CommittedMerkleTree<F>>::with_capacity(num_rounds - 1);
-        let mut codewords = Vec::<Vec<F>>::with_capacity(num_rounds);
+        let mut committed_round_polys = Vec::<CommittedSparseUniPoly<F>>::with_capacity(num_rounds);
 
-        let mut codeword = codeword;
-        let mut challenges = Vec::with_capacity(num_rounds);
-        for i in 0..num_rounds {
-            if i != 0 {
-                // For i = 0, the verifier derives the opening from the oracle
-                // of f(X), so we don't need to commit to it.
-                let tree = CommittedMerkleTree::<F>::from_leaves(codeword.clone());
-                transcript.append_bytes(&tree.root());
-                trees.push(tree);
+        let weight_alpha = transcript.challenge_fe();
+        let weight_beta = transcript.challenge_fe();
+
+        // This is the degree of f_0
+        let poly_max_degree = committed_polys[0].degree;
+
+        // g(x) will be the degree-corrected random linear combination of the committed polynomials
+        let g_poly_degree = poly_max_degree.next_power_of_two();
+
+        // TODO adjust degree of g(x) to be power of two
+
+        // Compute the degree-corrected random  combination of the committed polynomials
+        let mut g_poly_coeffs = vec![F::ZERO; poly_max_degree + 1];
+
+        // Compute the DEEP polynomials for all the committed polynomials
+
+        for committed_poly in committed_polys {
+            for coeff in &committed_poly.coeffs {
+                // TODO: Random linear combination
+                g_poly_coeffs[coeff.0] += coeff.1;
             }
-
-            // "Fold" the codeword
-            let x = transcript.challenge_fe();
-            challenges.push(x);
-            codeword = self.fold(&codeword, &self.config.L[i], x);
-            codewords.push(codeword.clone());
         }
 
-        (codewords, trees)
+        let g_poly_coeffs_dense = g_poly_coeffs
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (i, *c))
+            .filter(|(_, c)| *c != F::ZERO)
+            .collect::<Vec<(usize, F)>>();
+
+        let mut g_poly = SparseUniPoly::new(g_poly_coeffs_dense, poly_max_degree);
+
+        for i in 0..num_rounds {
+            let tree = g_poly.merkle_commit(
+                self.config.domain_generator(i),
+                self.config.expansion_factor,
+                transcript,
+            );
+            committed_round_polys.push(tree);
+
+            // "Fold" the polynomial
+            let x = transcript.challenge_fe();
+            g_poly = self.fold(&g_poly, x);
+        }
+
+        committed_round_polys
     }
 
+    // query f_0(x), f_1(x), f_2(x), ..., f_m-1(x) at random indices
     pub fn query_first_round(
         &self,
         indices: &mut Vec<usize>,
-        codeword: &[F],
-        codeword_next: &[F],
-        f_trees: &[CommittedMerkleTree<F>],
-        tree_next: &CommittedMerkleTree<F>,
+        f_trees: &[&CommittedMerkleTree<F>],
+        g_1: &CommittedMerkleTree<F>,
     ) -> Vec<QueryFirstRound<F>> {
-        debug_assert_eq!(codeword.len(), self.config.L[0].len());
-        debug_assert_eq!(codeword_next.len(), self.config.L[1].len());
         debug_assert_eq!(self.config.num_queries, indices.len());
 
         let mut queries = Vec::with_capacity(self.config.num_queries);
 
-        // Compute the degree-1 polynomial from the indices
-
-        let next_layer_size = codeword_next.len();
-        let folding_factor = self.config.folding_factor as u64;
-
         for index in indices {
-            let e3 = codeword_next[*index];
+            let domain_generator = self.config.domain_generator(0);
 
-            // Check that the folded polynomial equals the
-            // random linear combination of the og polynomial.
+            // s_0 = w^i
+            let s_0_index = *index;
+            let s_0 = domain_generator.pow(&[s_0_index as u64, 0, 0, 0]); // w^i
 
-            // Sanity check
-            let s_0 = self.config.L[0][*index];
-            let s_1 = self.config.L[0][*index + next_layer_size];
-            let y = self.config.L[1][*index];
-            debug_assert_eq!(y, s_0.pow([folding_factor, 0, 0, 0]));
-            debug_assert_eq!(y, s_1.pow([folding_factor, 0, 0, 0]));
+            // s_1 = w^{i + n} where n is the domain order of the next round
+            let s_1_index = s_0_index + self.config.domain_order_in_round(1);
+            let s_1 = domain_generator.pow(&[s_1_index as u64, 0, 0, 0]);
 
-            let mut openings_at_s0 = Vec::with_capacity(f_trees.len());
-            let mut openings_at_s1 = Vec::with_capacity(f_trees.len());
-            for f_tree in f_trees {
-                let opening_at_s0 = f_tree.open_index(*index);
-                let opening_at_s1 = f_tree.open_index(*index + (codeword.len() / 2));
-                openings_at_s0.push(opening_at_s0);
-                openings_at_s1.push(opening_at_s1);
-            }
+            // y = s_0^2 = s_1^2
+            let y = s_0 * s_0;
+            debug_assert_eq!(y, s_1 * s_1);
 
-            let g_1_opening_at_t = tree_next.open(e3);
+            // open f_0(x), f_1(x), ..., f_{m-1}(x) at s_0
+            let f_openings = f_trees
+                .iter()
+                .map(|f_tree| FirstRoundBoundedPolyOpenings {
+                    opening_at_s0: f_tree.open_index(s_0_index),
+                    opening_at_s1: f_tree.open_index(s_1_index),
+                })
+                .collect::<Vec<FirstRoundBoundedPolyOpenings<F>>>();
 
-            let bounded_poly_openings = (openings_at_s0.iter().zip(openings_at_s1.iter()))
-                .map(
-                    |(opening_at_s0, opening_at_s1)| FirstRoundBoundedPolyOpenings {
-                        opening_at_s0: opening_at_s0.clone(),
-                        opening_at_s1: opening_at_s1.clone(),
-                    },
-                )
-                .collect();
+            // open g_1(x) at y
+            let g_opening = g_1.open(y);
 
             queries.push(QueryFirstRound {
-                bounded_poly_openings,
-                g_1_opening_at_t,
-            });
+                bounded_poly_openings: f_openings,
+                g_1_opening_at_t: g_opening,
+            })
         }
 
         queries
@@ -395,8 +378,7 @@ where
     pub fn query(
         &self,
         indices: &mut Vec<usize>,
-        codewords: &[Vec<F>],
-        trees: &[CommittedMerkleTree<F>],
+        g_trees: &[&CommittedMerkleTree<F>],
         transcript: &mut Transcript<F>,
     ) -> Vec<RoundQueries<F>> {
         let num_rounds = self.config.num_rounds();
@@ -404,43 +386,24 @@ where
 
         // We skip the first round because the verifier derives the opening
         // from the oracle of the polynomials that consists of g(X)
-        let folding_factor = self.config.folding_factor as u64;
         for i in 0..(num_rounds - 2) {
-            let codeword = codewords[i].clone();
-            let codeword_next = codewords[i + 1].clone();
-            let tree = &trees[i];
-            let tree_next = &trees[i + 1];
+            let round = i + 1; // Round 0 is done in query_first_round
+            let round_domain_order = self.config.domain_order_in_round(round);
 
-            reduce_indices(indices, codeword_next.len());
-            // Compute the degree-1 polynomial from the indices
+            let tree = &g_trees[i];
+            let tree_next = &g_trees[i + 1];
 
-            let mut openings_i = Vec::with_capacity(indices.len());
-            for index in indices.clone() {
-                let e0 = codeword[index];
-                let e1 = codeword[index + (codeword.len() / 2)];
-                let e3 = codeword_next[index];
+            reduce_indices(indices, round_domain_order / 2);
 
-                // Check that the folded polynomial equals the
-                // random linear combination of the og polynomial.
+            let openings_i = indices
+                .iter()
+                .map(|index| Query {
+                    opening_at_s0: tree.open_index(*index),
+                    opening_at_s1: tree.open_index(*index + (round_domain_order / 2)),
+                    opening_at_t: tree_next.open_index(*index),
+                })
+                .collect();
 
-                // Sanity check
-                let s_0 = self.config.L[i + 1][index];
-                let s_1 = self.config.L[i + 1][index + (codeword.len() / 2)];
-                let y = self.config.L[i + 2][index];
-
-                debug_assert_eq!(y, s_0.pow([folding_factor, 0, 0, 0]));
-                debug_assert_eq!(y, s_1.pow([folding_factor, 0, 0, 0]));
-
-                let opening_at_s0 = tree.open(e0);
-                let opening_at_s1 = tree.open(e1);
-                let opening_at_t = tree_next.open(e3);
-
-                openings_i.push(Query {
-                    opening_at_s0,
-                    opening_at_s1,
-                    opening_at_t,
-                });
-            }
             queries.push(RoundQueries {
                 queries: openings_i,
             });
@@ -495,18 +458,17 @@ where
     ) -> (F, F) {
         let bounded_poly_openings = &query_first_round.bounded_poly_openings;
 
-        let mut poly_degree = self.config.L[0].len() / self.config.expansion_factor - 1;
+        let round_0_domain_generator = self.config.domain_generator(0);
+        let round_0_domain_order = self.config.domain_order_in_round(0);
+
+        let mut poly_degree = round_0_domain_order / self.config.expansion_factor - 1;
         let k = (poly_degree + 1).next_power_of_two();
 
         // round_0_openings consists of all openings for all the queries
 
-        let domain = &self.config.L[0];
-
-        let s_0 = domain[index];
-        let s_1 = domain[index + (domain.len() / 2)];
-
-        // Sanity check
-        assert_eq!(self.config.L[1][index], s_0 * s_0);
+        let s_0 = round_0_domain_generator.pow(&[index as u64, 0, 0, 0]);
+        let s_1 =
+            round_0_domain_generator.pow(&[(index + (round_0_domain_order / 2)) as u64, 0, 0, 0]);
 
         // \e0 and e1 openings consists of all openings of the batched polynomials,
         // whereas \beta opening is a single opening to the batched polynomial.
@@ -561,9 +523,14 @@ where
             let pad_degree = k - poly_degree - 1;
 
             // x_pow_0 = w^{index}^{k-d-1}
-            let x_pow_0 = domain[index].pow(&[pad_degree as u64, 0, 0, 0]);
+            let x_pow_0 = round_0_domain_generator.pow(&[(index + pad_degree) as u64, 0, 0, 0]);
             // Compute w^{index + (domain.len() / 2)}^{k-d-1}
-            let x_pow_1 = domain[index + (domain.len() / 2)].pow(&[pad_degree as u64, 0, 0, 0]);
+            let x_pow_1 = round_0_domain_generator.pow(&[
+                (index + (round_0_domain_order / 2) + pad_degree) as u64,
+                0,
+                0,
+                0,
+            ]);
 
             let q_beta_weight = challenge_weights[i * 3];
 
@@ -649,22 +616,25 @@ where
             }
         }
 
-        let reduced_domain = &self.config.L[self.config.L.len() - 1];
+        let final_domain_generator = self.config.domain_generator(num_rounds - 1);
+        let reduced_domain = (0..self.config.final_codeword_size)
+            .map(|i| final_domain_generator.pow(&[i as u64, 0, 0, 0]))
+            .collect::<Vec<F>>();
         debug_assert_eq!(reduced_domain.len(), proof.reduced_codeword.len());
 
         // Check that the final codeword corresponds to a low-degree polynomial
         let interpolant = UniPoly::interpolate(&reduced_domain, &proof.reduced_codeword);
-        let target_degree = self.config.final_codeword_size() / self.config.expansion_factor - 1;
+        let target_degree = self.config.final_codeword_size / self.config.expansion_factor - 1;
         assert_eq!(interpolant.degree(), target_degree);
 
         let mut indices = sample_indices(
             self.config.num_queries,
-            self.config.L[0].len(),
-            self.config.final_codeword_size(),
+            self.config.domain_order_in_round(1),
+            self.config.final_codeword_size,
             transcript,
         );
 
-        reduce_indices(&mut indices, self.config.L[1].len());
+        reduce_indices(&mut indices, self.config.domain_order_in_round(1));
 
         for (index, query) in indices.iter().zip(&proof.queries_first_round) {
             let (coeff, intercept) = self.interpolate_round_0_poly_at_index(
@@ -704,20 +674,18 @@ where
         }
 
         for i in 0..(num_rounds - 2) {
-            reduce_indices(&mut indices, self.config.L[i + 2].len());
+            let round = i + 1;
+            let domain_generator = self.config.domain_generator(round);
+            let domain_order = self.config.domain_order_in_round(round);
+            reduce_indices(&mut indices, domain_order / 2);
             for (j, openings) in proof.queries[i].queries.iter().enumerate() {
                 let opening_at_s0 = &openings.opening_at_s0;
                 let opening_at_s1 = &openings.opening_at_s1;
                 let opening_at_t = &openings.opening_at_t;
 
-                let L_i = &self.config.L[i + 1];
-                let L_i_next = &self.config.L[i + 2];
                 let index = indices[j];
-                let s_0 = L_i[index];
-                let s_1 = L_i[index + (L_i.len() / 2)];
-                let y = L_i_next[index];
-                assert_eq!(y, s_0 * s_0);
-                assert_eq!(y, s_1 * s_1);
+                let s_0 = domain_generator.pow(&[index as u64, 0, 0, 0]);
+                let s_1 = domain_generator.pow(&[(index + domain_order / 2) as u64, 1, 0, 0]);
 
                 let e0 = opening_at_s0.leaf_fe();
                 let e1 = opening_at_s1.leaf_fe();

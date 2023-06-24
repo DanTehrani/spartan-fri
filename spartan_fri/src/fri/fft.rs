@@ -28,21 +28,7 @@ where
         .collect::<Vec<F>>();
 
     // Square the domain values
-    /*
-    let domain_squared: Vec<F> = domain
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| i % 2 == 0)
-        .map(|(_, x)| *x)
-        .collect();
-     */
-
-    let mut domain_squared = vec![];
-    domain.iter().map(|x| x.square()).for_each(|x| {
-        if !domain_squared.contains(&x) {
-            domain_squared.push(x);
-        }
-    });
+    let domain_squared: Vec<F> = (0..(domain.len() / 2)).map(|i| domain[i * 2]).collect();
 
     let fft_e = fft(&L, &domain_squared);
     let fft_o = fft(&R, &domain_squared);

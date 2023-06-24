@@ -7,7 +7,7 @@ use spartan_fri::{MultilinearPCS, R1CS};
 type F = pasta_curves::Fp;
 
 fn criterion_benchmark(c: &mut Criterion) {
-    let num_cons = 2usize.pow(10);
+    let num_cons = 2usize.pow(13);
     let num_vars = num_cons;
     let num_input = 0;
 
@@ -17,7 +17,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     let num_queries = 30;
     let expansion_factor = 2;
     let folding_factor = 2;
-    let final_codeword_size = 1;
+    let final_codeword_size: usize = 1;
 
     let indexer_fri_config = FRIConfig::<F>::new(
         num_cons * num_vars,
@@ -37,13 +37,12 @@ fn criterion_benchmark(c: &mut Criterion) {
     let pcs_witness = FRIMLPolyCommit::<F>::new(fri_config);
     let pcs_indexer = FRIMLPolyCommit::<F>::new(indexer_fri_config);
 
-    c.bench_function("prove", |b| {
+    let mut group = c.benchmark_group("prover");
+    group.sample_size(10);
+    group.bench_function("prove", |b| {
         b.iter(|| {
-            let prover = SpartanProver::<F, FRIMLPolyCommit<F>>::new(
-                r1cs.clone(),
-                pcs_witness.clone(),
-                pcs_indexer.clone(),
-            );
+            let prover =
+                SpartanProver::<F, FRIMLPolyCommit<F>>::new(r1cs.clone(), pcs_witness.clone());
             let mut transcript = Transcript::new(b"bench");
             prover.prove(black_box(&witness), black_box(&mut transcript));
         })

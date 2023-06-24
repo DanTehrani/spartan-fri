@@ -22,9 +22,13 @@ impl<F: FieldExt, PCS: MultilinearPCS<F>> Indexer<F, PCS> {
         // Compute the multilinear extension of the R1CS matrices.
         // Commit the evaluations
         let s = (self.r1cs.num_vars as f64).log2() as usize;
-        let a_mle = self.r1cs.A.to_ml_extension(s);
-        let b_mle = self.r1cs.B.to_ml_extension(s);
-        let c_mle = self.r1cs.C.to_ml_extension(s);
+        let mut a_mle = self.r1cs.A.to_ml_extension(s);
+        let mut b_mle = self.r1cs.B.to_ml_extension(s);
+        let mut c_mle = self.r1cs.C.to_ml_extension(s);
+
+        a_mle.compute_coeffs();
+        b_mle.compute_coeffs();
+        c_mle.compute_coeffs();
 
         let a_comm = self.pcs.commit(&a_mle);
         let b_comm = self.pcs.commit(&b_mle);

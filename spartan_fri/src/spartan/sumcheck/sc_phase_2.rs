@@ -1,19 +1,25 @@
-// Phase 2 sum-check of Spartan.
+use core::num;
 
+use crate::r1cs::r1cs::Matrix;
+use crate::spartan::polynomial::blinder_poly::BlinderPoly;
+use crate::spartan::polynomial::eq_poly::EqPoly;
 use crate::spartan::polynomial::ml_poly::MlPoly;
 use crate::spartan::sumcheck::unipoly::UniPoly;
 use crate::spartan::utils::boolean_hypercube;
+use crate::transcript::Transcript;
 use crate::FieldExt;
 
 pub struct SCPhase2Proof<F: FieldExt> {
     pub round_polys: Vec<UniPoly<F>>,
+    pub blinder_poly_sum: F,
+    pub blinder_poly_eval_claim: F,
 }
 
 pub struct SumCheckPhase2<F: FieldExt> {
-    A_mle: MlPoly<F>,
-    B_mle: MlPoly<F>,
-    C_mle: MlPoly<F>,
-    Z_mle: MlPoly<F>,
+    A_mat: Matrix<F>,
+    B_mat: Matrix<F>,
+    C_mat: Matrix<F>,
+    Z_evals: Vec<F>,
     rx: Vec<F>,
     r: [F; 3],
     challenge: Vec<F>,
@@ -21,83 +27,108 @@ pub struct SumCheckPhase2<F: FieldExt> {
 
 impl<F: FieldExt> SumCheckPhase2<F> {
     pub fn new(
-        A_mle: MlPoly<F>,
-        B_mle: MlPoly<F>,
-        C_mle: MlPoly<F>,
-        Z_mle: MlPoly<F>,
+        A_mat: Matrix<F>,
+        B_mat: Matrix<F>,
+        C_mat: Matrix<F>,
+        Z_evals: Vec<F>,
         rx: Vec<F>,
         r: [F; 3],
         challenge: Vec<F>,
     ) -> Self {
         Self {
-            A_mle,
-            B_mle,
-            C_mle,
-            Z_mle,
+            A_mat,
+            B_mat,
+            C_mat,
+            Z_evals,
             rx,
             r,
             challenge,
         }
     }
 
-    fn eval_poly(&self, vars: &[F]) -> F {
-        debug_assert_eq!(vars.len(), self.A_mle.num_vars / 2);
+    pub fn prove(&self, transcript: &mut Transcript<F>) -> SCPhase2Proof<F> {
+        let zero = F::ZERO;
+        let one = F::ONE;
 
         let r_A = self.r[0];
         let r_B = self.r[1];
         let r_C = self.r[2];
 
-        let z_eval = self.Z_mle.eval(&vars);
-        let mut r_x = self.rx.clone();
-        r_x.reverse();
-        let eval_at = [&vars, r_x.as_slice()].concat();
-        let a_eval = self.A_mle.eval(&eval_at) * z_eval;
-        let b_eval = self.B_mle.eval(&eval_at) * z_eval;
-        let c_eval = self.C_mle.eval(&eval_at) * z_eval;
+        let n = self.Z_evals.len();
+        let num_vars = (self.Z_evals.len() as f64).log2() as usize;
 
-        a_eval * r_A + b_eval * r_B + c_eval * r_C
-    }
+        let evals_rx = EqPoly::new(self.rx.clone()).evals();
+        let mut A_evals = vec![F::ZERO; n];
+        let mut B_evals = vec![F::ZERO; n];
+        let mut C_evals = vec![F::ZERO; n];
 
-    pub fn round(&self, j: usize) -> UniPoly<F> {
-        // evaluate at points 0, 1, 2, 3
-
-        let zero = F::ZERO;
-        let one = F::ONE;
-
-        let m = self.A_mle.num_vars / 2;
-        let mut evals = [F::ZERO; 3];
-
-        for vars in &boolean_hypercube(m - j - 1) {
-            let mut c = self.challenge[..j].to_vec();
-            c.reverse();
-            let mut eval_at = vec![vars.as_slice(), &[zero], &c].concat();
-
-            // Eval at 0
-            evals[0] += self.eval_poly(&eval_at);
-
-            // Eval at 1
-            eval_at[vars.len()] = one;
-            evals[1] += self.eval_poly(&eval_at);
-
-            // Eval at 2
-            eval_at[vars.len()] = F::from(2u64);
-            evals[2] += self.eval_poly(&eval_at);
+        for entry in &self.A_mat.0 {
+            A_evals[entry.1] += evals_rx[entry.0] * entry.2;
+        }
+        for entry in &self.B_mat.0 {
+            B_evals[entry.1] += evals_rx[entry.0] * entry.2;
+        }
+        for entry in &self.C_mat.0 {
+            C_evals[entry.1] += evals_rx[entry.0] * entry.2;
         }
 
-        let round_poly = UniPoly::interpolate(&evals);
-        round_poly
-    }
+        // Sample a blinding polynomial g(x_1, ..., x_m) of degree 3
+        let random_evals = (0..2usize.pow(num_vars as u32))
+            .map(|_| F::random(&mut rand::thread_rng()))
+            .collect::<Vec<F>>();
+        let blinder_poly_sum = random_evals.iter().fold(F::ZERO, |acc, x| acc + x);
+        let blinder_poly = MlPoly::new(random_evals);
 
-    pub fn prove(&self) -> SCPhase2Proof<F> {
-        let num_vars = self.A_mle.num_vars / 2;
-        let mut round_polys = Vec::<UniPoly<F>>::with_capacity(num_vars - 1);
+        transcript.append_fe(&blinder_poly_sum);
+        let rho = transcript.challenge_fe();
+        println!("rho: {:?}", rho);
 
-        for i in 0..num_vars {
-            let round_poly = self.round(i);
+        let mut round_polys: Vec<UniPoly<F>> = Vec::<UniPoly<F>>::with_capacity(num_vars);
+
+        let mut A_table = A_evals.clone();
+        let mut B_table = B_evals.clone();
+        let mut C_table = C_evals.clone();
+        let mut Z_table = self.Z_evals.clone();
+        let mut blinder_table = blinder_poly.evals.clone();
+
+        for j in 0..num_vars {
+            let high_index = 2usize.pow((num_vars - j - 1) as u32);
+            let mut evals = [F::ZERO; 3];
+
+            for b in 0..high_index {
+                let r_y_i = self.challenge[j];
+                for (i, eval_at) in [zero, one, F::from(2)].iter().enumerate() {
+                    let a_eval = A_table[b] + (A_table[b + high_index] - A_table[b]) * eval_at;
+                    let b_eval = B_table[b] + (B_table[b + high_index] - B_table[b]) * eval_at;
+                    let c_eval = C_table[b] + (C_table[b + high_index] - C_table[b]) * eval_at;
+                    let z_eval = Z_table[b] + (Z_table[b + high_index] - Z_table[b]) * eval_at;
+                    let blinder_eval = blinder_table[b]
+                        + (blinder_table[b + high_index] - blinder_table[b]) * eval_at;
+                    evals[i] +=
+                        (a_eval * r_A + b_eval * r_B + c_eval * r_C) * z_eval + rho * blinder_eval;
+                }
+
+                A_table[b] = A_table[b] + (A_table[b + high_index] - A_table[b]) * r_y_i;
+                B_table[b] = B_table[b] + (B_table[b + high_index] - B_table[b]) * r_y_i;
+                C_table[b] = C_table[b] + (C_table[b + high_index] - C_table[b]) * r_y_i;
+                Z_table[b] = Z_table[b] + (Z_table[b + high_index] - Z_table[b]) * r_y_i;
+                blinder_table[b] =
+                    blinder_table[b] + (blinder_table[b + high_index] - blinder_table[b]) * r_y_i;
+            }
+
+            let round_poly = UniPoly::interpolate(&evals);
             round_polys.push(round_poly);
         }
 
-        SCPhase2Proof { round_polys }
+        let mut r_y_rev = self.challenge.clone();
+        r_y_rev.reverse();
+        let blinder_poly_eval_claim = blinder_poly.eval(&r_y_rev);
+
+        SCPhase2Proof {
+            round_polys,
+            blinder_poly_eval_claim,
+            blinder_poly_sum,
+        }
     }
 
     pub fn verify_round_polys(sum_target: F, proof: &SCPhase2Proof<F>, challenge: &[F]) -> F {
@@ -114,6 +145,7 @@ impl<F: FieldExt> SumCheckPhase2<F> {
                 "i = {}",
                 i
             );
+
             target = round_poly.eval(challenge[i]);
         }
 
